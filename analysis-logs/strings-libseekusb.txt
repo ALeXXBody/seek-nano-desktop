@@ -1,0 +1,321 @@
+Android
+r26d
+11579264
+8h"D 
+tq,`
+j'+i
+[B><
+__cxa_finalize
+__cxa_atexit
+__register_atfork
+seekusb_load_jvm
+seekusb_device_get_timeout
+seekusb_device_set_timeout
+seekusb_device_get_frame_request_delay
+seekusb_device_set_frame_request_delay
+seekusb_device_get_device_id
+seekusb_device_get_device_state
+seekusb_device_get_io_properties
+seekusb_device_metric_frame_count
+seekusb_device_metric_uptime
+seekusb_device_metric_frame_data_transferred
+seekusb_device_metric_total_data_transferred
+seekusb_device_metric_frame_throughput
+seekusb_device_metric_total_throughput
+seekusb_device_manager_create
+calloc
+seekusb_authenticator_create
+seekusb_authenticator_destroy
+free
+seekusb_device_manager_destroy
+__stack_chk_fail
+__stack_chk_guard
+seekusb_device_sleep
+seekusb_device_manager_register_event_callback
+printf
+puts
+seekusb_authenticator_query_core_part_number
+seekusb_device_get_chipid
+seekusb_device_register_frame_available_callback
+seekusb_device_update_firmware
+seekusb_device_write_memory_region
+floor
+seekusb_device_run
+seekusb_device_set_opmode
+seekusb_device_get_opmode
+seekusb_device_reboot
+__vsprintf_chk
+seekusb_device_get_firmware_version
+seekusb_device_copy_memory_region
+seekusb_device_read_memory_region
+seekusb_device_get_last_firmware_error
+seekusb_device_set_platform
+seekusb_device_get_ipmode
+seekusb_device_set_ipmode
+seekusb_device_get_firmware_info
+seekusb_device_get_serial_number
+seekusb_device_get_core_part_number
+seekusb_device_get_manufacture_date
+seekusb_device_get_factory_settings
+seekusb_device_peripheral_control
+seekusb_device_bandwidth_test
+__strncpy_chk2
+seekusb_authenticator_allow_guid
+strcmp
+seekusb_authenticator_allow_core_part_number
+seekusb_authenticator_deny_guid
+seekusb_authenticator_deny_core_part_number
+seekusb_authenticator_query_guid
+Java_com_thermal_seekcamera_NativeUsbDeviceManager_initializeNativeUsbDeviceManager
+Java_com_thermal_seekcamera_NativeUsbDevice_initializeTransferArrays
+getpagesize
+__android_log_print
+__errno
+pthread_mutex_init
+pthread_mutex_destroy
+pthread_mutex_lock
+pthread_mutex_unlock
+pthread_create
+pthread_join
+usleep
+pthread_setname_np
+pthread_cond_init
+pthread_cond_destroy
+pthread_cond_signal
+pthread_cond_wait
+clock_gettime
+pthread_cond_timedwait
+memcpy
+memset
+libm.so
+LIBC
+libc.so
+liblog.so
+libseekusb.so
+ManagerSink
+USB Sink
+USB Source
+(I)Lcom/thermal/seekcamera/NativeUsbDevice;
+Native Control Transfer: device is null
+Failed to create device: error: %d
+()[I
+CreateDevice
+FindDevices
+Native Bulk Transfer: Failure: %d
+Close
+%02X%02X%02X%02X%02X%02X
+Creating Device
+ControlTransfer
+Bulk Transfer Native Error: %d
+Native Control Transfer Failure: %d
+Native Error: %d
+%s: Dropping frame
+nativeusb
+BulkTransfer
+(IBI)I
+Native Control Transfer: data is null
+Open
+F4BAF4F4-177D-4165-8A6B-90C3306F9CA3
+36607C12-F598-4044-AD5C-A8F98DDA496A
+53225FC0-DE69-4DCB-AD8F-3CB36214ABE1
+9DAD69CE-287C-4C5C-9A2A-EE310EE8A9B3
+3188
+2980
+3272X
+A`pG
+0F,`
+F.HxD
+`(h@h
+(h@h
+(h@h
+(hG`(h
+IyD	h	h
+hh!h
+ hT0
+!AQ!h
+  `p
+"FyD
+I iyD
+`h)F
+@m'h
+ FAF
+`h)F
+IyD	h	h
+ hIF
+F hIF
+((`s
+iIF2F
+!X"@
+!N"3F
+PFV"
+!X"@
+PFN"
+8FAF
+ pG-
+ AFO
+2 AF
+d AF
+AxD`
+%F@F
+!C"@,(
+@FR"
+%F@F
+!P"@,(
+&F@F
+!C"@,(
+&F@F
+!P"@,(
+IyD	h	h
+Y@T<
+!<"+F
+!="3F
+I"F`d(FyD
+"FyD0F
+I(hyD
+I0hyD
+*F0F9F
+l F1F*F
+\IyD	h	h
+F`m)F
+a `AC
+f`)F
+!<"CF
+!=";F
+IyD	h	h
+F4HxD
+IyDQ
+	JzD
+F Io
+(yD	h	h	
+IyD	h	h
+I|DyD#F	h	h
+IyD	h	h
+8F1F
+FbF6
+!F*F1
+FHHxD
+(FRF;F
+7JzD
+(FZ"
+'F(F
+!D"@,(
+7F(F
+!D"@.(
+FRHo
+MIyD	h	h
+F`mB
+AR"xD`
+FF F
+GF F
+`m1F
+IyDQ
+,F0F
+!N"@-(
+(FV"
+!X"#F@
+(FV"
+!X"#F@
+(FV"
+!X"#F@
+!V"SF
+&	0"0#}D
+ h0#
+IIyD
+ h0#
+)F0F
+#~D1F
+ h0#
+,IyD
+ h0#
+)F0F
+#}D)F
+ h0#
+IyD F
+DD2@
+0F)F
+'(F!F
+(F1F
+(l `
+8h `
+FBm(F
+N!F~Dp`(hBm(F
+FpG-
+h`(F
+@zD{D1F
+@zD{D
+F'FU
+FKHxD
+MJzD
+( `m
+h%J%K
+`zD{D9F
+h!J"K
+`zD{D9F
+M9F}D+F
+hJmQF
+~DiF
+JyDzD
+JyDzD
+ yDzD
+JyDzD
+FpGo
+0pGo
+F9Ho
+!i"j
+JyDzD
+;Fih
+IyD	h	h
+ yDzD
+!i`i
+5F0a
+)h(iQ
+$(`@
+pN`zD+h
+ i%x
+ i%p
+E	(Fp
+(FeD
+qFuE
+2+D2D
+C!DD
+pFsE
+8sEO
+FjFPF
+zqHC
+IyD	h	h
+ h	h
+IyD	h	h
+(knNR
+D`G@
+D`G@
+D`G@
+D`G@
+D`G@
+D`G@
+Android (11349228, +pgo, +bolt, +lto, -mlgo, based on r487747e) clang version 17.0.2 (https://android.googlesource.com/toolchain/llvm-project d9f89f4d16663d5012e5c09495f3b30ece3d2362)
+Linker: LLD 17.0.2
+aeabi
+C2.09
+.note.android.ident
+.note.gnu.build-id
+.dynsym
+.gnu.version
+.gnu.version_r
+.gnu.hash
+.dynstr
+.rel.dyn
+.ARM.exidx
+.rel.plt
+.ARM.extab
+.rodata
+.text
+.plt
+.data.rel.ro
+.fini_array
+.dynamic
+.got
+.got.plt
+.bss
+.comment
+.ARM.attributes
+.shstrtab

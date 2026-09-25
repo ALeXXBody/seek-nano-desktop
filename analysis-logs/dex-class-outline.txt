@@ -1,0 +1,104 @@
+================================================================================
+CLASS: Lcom/thermal/seekcamera/NativeAndroidTools;
+
+  METHOD: <init> ()V
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+
+  METHOD: GetDirectory (Landroid/content/Context;)Ljava/lang/String;
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+================================================================================
+CLASS: Lcom/thermal/seekcamera/NativeUsbDevice;
+  FIELD: LOGTAG : Ljava/lang/String;
+  FIELD: bulkInEp : Landroid/hardware/usb/UsbEndpoint;
+  FIELD: bulkRequest : Landroid/hardware/usb/UsbRequest;
+  FIELD: bulkTransferArray : [B
+  FIELD: connection : Landroid/hardware/usb/UsbDeviceConnection;
+  FIELD: context : Landroid/content/Context;
+  FIELD: controlTransferArray : [B
+  FIELD: ctlEp : Landroid/hardware/usb/UsbEndpoint;
+  FIELD: device : Landroid/hardware/usb/UsbDevice;
+  FIELD: isOpen : Z
+  FIELD: manager : Landroid/hardware/usb/UsbManager;
+  FIELD: usbTimeout : I
+
+  METHOD: <init> (Landroid/hardware/usb/UsbDevice; Landroid/hardware/usb/UsbManager; Landroid/content/Context;)V
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+
+  METHOD: Cleanup ()V
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+
+  METHOD: initializeTransferArrays ([B [B)V
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+
+  METHOD: BulkTransfer (I B I)I
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+
+  METHOD: Close ()V
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+
+  METHOD: ControlTransfer (I B I)I
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+
+  METHOD: GetChipID ()V
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+
+  METHOD: GetTimeout ()I
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+
+  METHOD: IsOpened ()Z
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+
+  METHOD: Open ()Z
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+
+  METHOD: SetTimeout (I)V
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+================================================================================
+CLASS: Lcom/thermal/seekcamera/NativeUsbDeviceManager$a;
+
+  METHOD: <init> ()V
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+
+  METHOD: onReceive (Landroid/content/Context; Landroid/content/Intent;)V
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+================================================================================
+CLASS: Lcom/thermal/seekcamera/NativeUsbDeviceManager;
+  FIELD: ACTION_USB_PERMISSION : Ljava/lang/String;
+  FIELD: LOGTAG : Ljava/lang/String;
+  FIELD: SEEKUSB_VENDOR_ID : I
+  FIELD: context : Landroid/content/Context;
+  FIELD: deviceClass : I
+  FIELD: deviceProtocol : I
+  FIELD: deviceSubclass : I
+  FIELD: manager : Landroid/hardware/usb/UsbManager;
+  FIELD: productId : I
+  FIELD: seekdev : Landroid/hardware/usb/UsbDevice;
+  FIELD: usbReceiver : Landroid/content/BroadcastReceiver;
+  FIELD: vendorId : I
+
+  METHOD: <init> (Landroid/content/Context;)V
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+
+  METHOD: CreateDevice (I)Lcom/thermal/seekcamera/NativeUsbDevice;
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+
+  METHOD: FindDevices ()[I
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+
+  METHOD: initializeNativeFSDataDir (Ljava/lang/String;)V
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+
+  METHOD: initializeNativeUsbDeviceManager (Lcom/thermal/seekcamera/NativeUsbDeviceManager;)V
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+================================================================================
+CLASS: Lcom/thermal/seeknano/MainActivity;
+  FIELD: j : Lcom/thermal/seekcamera/NativeUsbDeviceManager;
+
+  METHOD: <clinit> ()V
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+
+  METHOD: <init> ()V
+    <no source: 'NoneType' object has no attribute 'get_source_method'>
+
+  METHOD: q (Lio/flutter/embedding/engine/a;)V
+    <no source: 'NoneType' object has no attribute 'get_source_method'>

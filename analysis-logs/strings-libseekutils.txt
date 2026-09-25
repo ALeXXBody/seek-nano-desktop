@@ -1,0 +1,261 @@
+Android
+r26d
+11579264
+Y;ot(
+($ 	
+>_&`
+,VWG
+tZ\dB
+__cxa_finalize
+__cxa_atexit
+__register_atfork
+seeklogger_create
+calloc
+strncpy
+seekmutex_create
+stdout
+time
+seektime_format_utc_timestamp_ms
+fprintf
+fflush
+__stack_chk_fail
+fwrite
+__stack_chk_guard
+stderr
+seeklogger_destroy
+seekmutex_destroy
+free
+seeklogger_register_cb
+seekmutex_lock
+seekmutex_unlock
+seeklogger_get_name
+__strncpy_chk2
+seeklogger_get_level
+seeklogger_get_stream
+seeklogger_get_error_str
+seeklogger_log_trace
+__vsnprintf_chk
+seeklogger_log_debug
+seeklogger_log_info
+seeklogger_log_warn
+seeklogger_log_error
+seekqueue_destroy
+seekcondition_destroy
+seekqueue_construct
+seekcondition_construct
+seekmutex_construct
+seekqueue_create
+seekqueue_length
+seekqueue_isempty
+seekqueue_push
+seekcondition_timed_wait
+seekcondition_wait
+seekcondition_signal
+seekqueue_fpush
+seekqueue_tpush
+seekqueue_pop
+seekqueue_cpop
+seekqueue_tpop
+seekqueue_peek
+seekqueue_tpeek
+seekstoragequeue_construct
+seekstoragequeue_create
+seekstoragequeue_destroy
+seekstoragequeue_isempty
+seekstoragequeue_length
+seekstoragequeue_push
+seekstoragequeue_fpush
+seekstoragequeue_tpush
+seekstoragequeue_pop
+seekstoragequeue_tpop
+seekstoragequeue_peek
+seekstoragequeue_tpeek
+seeksemaphore_create
+seeksemaphore_destroy
+seeksemaphore_post
+seeksemaphore_wait
+seeksemaphore_try_wait
+seeksemaphore_timed_wait
+seekset_construct
+seekset_destroy
+seekset_create
+seekset_length
+seekset_add
+seekset_remove
+seekset_remove_all
+seekset_contains
+seekset_element
+seekset_copy_elements
+seektime_get_utc_us
+seektime_get_utc_ns
+seektime_get_utc_ms
+seektime_get_utc_s
+seektime_gmtime_from_s
+strftime
+strncat
+multiprocess_thread
+seek_multiprocess_create
+seekthread_construct
+seekthread_set_name
+seek_multiprocess_destroy
+seekthread_destroy
+seek_multiprocess_run
+seek_multiprocess_runasync
+seek_multiprocess_wait
+seekmutex_get_native_handle
+pthread_mutex_init
+pthread_mutex_destroy
+pthread_mutex_lock
+seekmutex_trylock
+pthread_mutex_trylock
+pthread_mutex_unlock
+seekthread_create
+pthread_create
+pthread_join
+seekthread_destroy_force
+usleep
+seekthread_set_priority
+pthread_setschedparam
+seekthread_get_priority
+pthread_getschedparam
+pthread_setname_np
+pthread_cond_init
+pthread_cond_destroy
+seekcondition_create
+pthread_cond_signal
+seekcondition_broadcast
+pthread_cond_broadcast
+pthread_cond_wait
+clock_gettime
+pthread_cond_timedwait
+seektime_sleep_ms
+seektime_sleep_us
+seektime_stopwatch_create
+seektime_stopwatch_start
+seektime_stopwatch_destroy
+seektime_stopwatch_is_running
+seektime_stopwatch_stop
+seektime_stopwatch_get_elapsed_s
+seektime_stopwatch_get_elapsed_ns
+seektime_localtime_from_s
+localtime_r
+gmtime_r
+memcpy
+libc.so
+LIBC
+libseekutils.so
+[%s] %s [%s] %s
+[DEBUG]
+[INFO] 
+success
+invalid parameter
+.%04d
+[ERROR]
+[WARN] 
+%Y-%m-%d %H:%M:%S
+seeklogger failed to format timestamp
+[TRACE]
+out of memory
+invalid error code
+Mutiprocess
+09F@"
+eyD h
+IyD	h	h
+"IyDQ
+IyD	h	h
+ pGp
+IyDQ
+HxDpG
+IyD	h	h
+IyD	h	h
+IyD	h	h
+IyD	h	h
+IyD	h	h
+!i`i
+1hH`5hhh
+ h@h
+%E`!hHi
+&P!h
+`h:F!i
+!a h
+`h!i
+0F!a
+`h!i
+!a h
+IyD	h	h
+IyD	h	h
+`h9F
+IyD	h	h
+ a F
+5F0a
+ pGp
+)h(iQ
+!IyD	h	h
+F0FO
+ F9FzD
+JyDzD
+ j%|
+ j%|
+,(`+
+&yDO
+aXF!F
+9F`a
+$(`@
+pN`zD+h
+ i%x
+ i%p
+E	(Fp
+  pH
+IyD	h	h
+$yD	h	h
+IyD	h	h
+(FeD
+qFuE
+2+D2D
+C!DD
+pFsE
+8sEO
+FjFPF
+zqHC
+IyD	h	h
+ h	h
+IyD	h	h
+(knN
+IyD	h	h
+ h	h
+$iFxD
+D`G@
+D`G@
+D`G@
+D`G@
+D`G@
+D`G@
+D`G@
+D`G@
+D`G@
+Android (11349228, +pgo, +bolt, +lto, -mlgo, based on r487747e) clang version 17.0.2 (https://android.googlesource.com/toolchain/llvm-project d9f89f4d16663d5012e5c09495f3b30ece3d2362)
+Linker: LLD 17.0.2
+aeabi
+C2.09
+.note.android.ident
+.note.gnu.build-id
+.dynsym
+.gnu.version
+.gnu.version_r
+.gnu.hash
+.dynstr
+.rel.dyn
+.ARM.exidx
+.rel.plt
+.ARM.extab
+.rodata
+.text
+.plt
+.data.rel.ro
+.fini_array
+.dynamic
+.got
+.got.plt
+.comment
+.ARM.attributes
+.shstrtab

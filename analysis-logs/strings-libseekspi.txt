@@ -1,0 +1,1274 @@
+Android
+r26d
+11579264
+usLq
+ V3R
+J],^
+v7tj
+hWH*@
+|aEfu
+{Ngc
+__cxa_finalize
+__cxa_atexit
+__register_atfork
+seekspi_device_fire_error
+__stack_chk_fail
+__stack_chk_guard
+seekspi_device_discrete_io_control
+seekspi_device_get_io_properties
+seekspi_device_manager_create
+calloc
+fopen
+yaml_parser_initialize
+yaml_parser_set_input_file
+yaml_parser_load
+yaml_document_get_root_node
+seekspi_error_get_str
+yaml_document_delete
+yaml_parser_delete
+seekspi_device_manager_destroy
+fprintf
+fclose
+stdout
+yaml_document_get_node
+strcasecmp
+atoi
+strstr
+seekspi_pir_store_calibration_data
+seekspi_pir_update_firmware
+seekspi_pir_get_factory_settings
+seekspi_pir_get_firmware_version
+seekspi_pir_get_chipid
+seekspi_pir_standardize_frame
+seekspi_pir_on_reboot
+seekspi_pir_on_sleep
+seekspi_pir_on_run
+seekspi_pir_on_close
+seekspi_pir_on_open
+seekspi_pir_get_frame_dimensions
+seekspi_pir_source_thread
+seekspi_pir_maxim_store_calibration_data
+seekspi_pir_maxim_get_factory_settings
+seekspi_pir_maxim_update_firmware
+seekspi_pir_maxim_get_firmware_version
+seekspi_pir_maxim_get_chipid
+seekspi_pir_maxim_standardize_frame
+seekspi_pir_maxim_on_reboot
+seekspi_pir_maxim_on_sleep
+seekspi_pir_maxim_on_run
+seekspi_pir_maxim_on_close
+seekspi_pir_maxim_on_open
+seekspi_pir_maxim_get_frame_dimensions
+seekspi_pir_maxim_source_thread
+free
+seekspi_device_sleep
+seekspi_get_device_state
+seekspi_device_manager_register_event_callback
+seekspi_device_register_frame_available_callback
+seekspi_device_update_firmware
+seekspi_device_store_calibration_data
+seekspi_device_run
+seekframe_get_header
+seekframe_get_header_size
+seekframe_get_data_size
+seekspi_device_reboot
+seekspi_device_get_chipid
+seekspi_device_get_firmware_version
+seekspi_device_get_factory_settings
+__vsnprintf_chk
+__vsprintf_chk
+seekspi_pir_maxim_write_memory
+__memcpy_chk
+floor
+seekframe_get_data
+fread
+ferror
+__errno
+SPIRAM
+SPIRAM_length
+ioctl
+access
+__open_2
+flock
+close
+yaml_get_version_string
+yaml_get_version
+yaml_malloc
+yaml_realloc
+yaml_free
+yaml_strdup
+yaml_string_extend
+yaml_string_join
+yaml_stack_extend
+yaml_queue_extend
+malloc
+realloc
+strdup
+yaml_token_delete
+yaml_parser_set_input_string
+yaml_parser_set_input
+yaml_parser_set_encoding
+yaml_emitter_initialize
+yaml_emitter_delete
+yaml_event_delete
+yaml_emitter_set_output_string
+yaml_emitter_set_output_file
+fwrite
+yaml_emitter_set_output
+yaml_emitter_set_encoding
+yaml_emitter_set_canonical
+yaml_emitter_set_indent
+yaml_emitter_set_width
+yaml_emitter_set_unicode
+yaml_emitter_set_break
+yaml_stream_start_event_initialize
+yaml_stream_end_event_initialize
+yaml_document_start_event_initialize
+strlen
+yaml_document_end_event_initialize
+yaml_alias_event_initialize
+yaml_scalar_event_initialize
+yaml_sequence_start_event_initialize
+yaml_sequence_end_event_initialize
+yaml_mapping_start_event_initialize
+yaml_mapping_end_event_initialize
+yaml_document_initialize
+yaml_document_add_scalar
+yaml_document_add_sequence
+yaml_document_add_mapping
+yaml_document_append_sequence_item
+yaml_document_append_mapping_pair
+yaml_parser_parse
+strcmp
+yaml_parser_fetch_more_tokens
+yaml_parser_update_buffer
+yaml_parser_scan
+memcmp
+strncpy
+time
+fflush
+stderr
+__strncpy_chk2
+strftime
+strncat
+pthread_mutex_init
+pthread_mutex_destroy
+pthread_mutex_lock
+pthread_mutex_unlock
+pthread_create
+pthread_join
+usleep
+pthread_setschedparam
+pthread_cond_init
+pthread_cond_destroy
+pthread_cond_signal
+pthread_cond_wait
+clock_gettime
+pthread_cond_timedwait
+gmtime_r
+seekframe_get_height
+seekframe_get_width
+seekframe_get_channels
+seekframe_get_pixel_depth
+seekframe_get_pixel_padding
+seekframe_get_line_stride
+seekframe_get_line_padding
+seekframe_get_row
+seekframe_get_pixel
+seekframe_is_empty
+Java_com_thermal_seekcamera_NativeUsbDeviceManager_initializeNativeFSDataDir
+stat
+__strlen_chk
+__write_chk
+strnlen
+read
+write
+lseek
+poll
+memcpy
+memmove
+memset
+libm.so
+LIBC
+libc.so
+LIBC_N
+libseekspi.so
+Configured spi bus-%u.camera-%zu.reset_ctrl.ioctl.request: %zu
+Failed configuring spi bits per word: %s
+[%s] %s [%s] %s
+Configured spi camera_sync: on
+Configured spi bus-%u.camera-%zu.power_ctrl.gpio: %u
+Failed to deinitialize power control: %s
+Added to runlist
+SPI communication error ROIC=0x%X LastErr=0x%X FrameNumber=0x%X LineNumber=0x%X
+YAML
+did not find expected '!'
+did not find expected tag URI
+[DEBUG]
+/sys/class/gpio/gpio%u
+Failed to get firmware version: %s
+SPI transfer failed: %s
+found duplicate anchor; first occurrence
+while scanning a block scalar
+Failed to load %s: %s
+Failed to update the seekspi source thread scheduling policy and/or priority, framerate may be reduced
+inverting
+Configured spi.bus-%u.camera-%zu.frame_sync.ioctl.request: %zu
+Failed to sync frame: %s
+while parsing a flow mapping
+incomplete UTF-8 octet sequence
+[INFO] 
+Configured spi bus-%u.camera-%zu.power_ctrl.ioctl.bytes: %zu
+success
+Failed reading device status: %s
+found unknown escape character
+invalid trailing UTF-8 octet
+conf
+Configured spi bus-%u.num: %u
+power_ctrl
+Configured spi bus-%u.camera-%zu.power_ctrl.inverting: off
+Failed to create device bus-%u.camera-%zu: %s
+unknown request
+second occurrence
+while parsing a block collection
+did not find expected whitespace or line break
+did not find expected hexdecimal number
+invalid leading UTF-8 octet
+Configured spi bus-%u.camera-%zu.reset_ctrl.inverting: off
+Failed to configure i2c ctrl bus-%u.camera-%zu.device_ctrl.i2c: %u
+invalid parameter
+file read failure
+Failed to write cal data: %s
+did not find expected '-' indicator
+while scanning a simple key
+could not find expected ':'
+while scanning an anchor
+while scanning an alias
+.%04d
+seekspi.conf
+Failed to parse %s: %s
+camera
+Mosaic
+Configured spi bus-%u.camera-%zu.frame_sync.inverting: on
+file write failure
+SPI command failed Cmd=%u CmdResult=%d
+tag:yaml.org,2002:
+while scanning a %YAML directive
+while scanning a tag directive
+input error
+[ERROR]
+camera_sync
+device_class
+Failed bringing device out of reset: %s
+did not find expected alphabetic or numeric character
+unexpected low surrogate area
+falling
+frame_sync
+true
+Configured i2c ctrl bus-%u.camera-%zu.device_ctrl.i2c: %u
+Failed setting spi mode: %s
+sensor communication failure
+found incompatible YAML document
+did not find expected ',' or '}'
+did not find expected version number
+while parsing a tag directive
+[WARN] 
+Failed to check spi bus-%u.camera-%zu.power_ctrl.gpio.properties
+bytes
+camera-%s
+overflow detected
+Failed reading Maxim status: %s
+found unexpected end of stream
+/dev/i2c-%d
+max_transfer_size
+reset_ctrl
+system call failure
+directory does not exist
+RDAC.bin
+request
+Unknown device protocol specified in seekspi.conf: %s
+%s/%s
+CmdWord.bin
+while parsing a block node
+while scanning a directive
+Configured spi camera_sync: off
+while parsing a node
+did not find expected digit or '.' character
+Failed powering up device: %s
+Failed to configure spi bus-%u.camera-%zu.frame_sync.gpio: %u
+invalid length of a UTF-8 sequence
+invalid Unicode character
+Configured spi bus-%u.camera-%zu.power_ctrl.settling_time_ms: %u
+Failed to check spi bus-%u.camera-%zu.reset_ctrl.gpio.properties
+unknown error
+request cannot be performed
+Storing cal data to camera
+did not find expected <document start>
+while parsing a flow sequence
+while scanning for the next token
+incomplete UTF-16 character
+%Y-%m-%d %H:%M:%S
+active_low
+Checked spi bus-%u.camera-%zu.reset_ctrl.gpio.properties.sync: %s
+%02X%02X%02X%02X%02X%02X
+Failed to write Maxim flash: %s
+tag:yaml.org,2002:seq
+while parsing a block mapping
+input is too long
+.seekthermal
+none
+Failed to resolve SDK base directory: %s
+Microcore
+device_ctrl
+insufficient permissions
+Failed to meet product firmware version requirement
+tag:yaml.org,2002:str
+did not find expected ',' or ']'
+found an incorrect trailing UTF-8 octet
+while scanning a plain scalar
+%s%s%s
+Configured spi bus-%u.speed_hz: %u
+not implemented
+Failed to start FPA: %s
+did not find URI escaped octet
+found an incorrect leading UTF-8 octet
+while parsing a quoted scalar
+seeklogger failed to format timestamp
+Configured spi driver: spidev
+supported
+Configured spi bus-%u.camera-%zu.reset_ctrl.ioctl.bytes: %zu
+Checked spi bus-%u.camera-%zu.frame_sync.gpio.properties.sync: %s
+Failed configuring spi speed: %s
+not supported
+verification failure
+FactorySettings.bin
+found unknown directive name
+could not find expected directive name
+both
+Failed to configure spi bus-%u.camera-%zu.power_ctrl.gpio: %u
+Configured spi bus-%u.camera-%zu.reset_ctrl.inverting: on
+Failed to read Maxim flash: %s
+found duplicate %TAG directive
+found a tab character where an indentation space is expected
+Micro Core
+Failed to open spi device: %s
+device communication failure
+Timeout waiting for frame_sync falling edge.
+Failed to erase Maxim flash: %s
+found duplicate %YAML directive
+found character that cannot start any token
+while scanning a tag
+Failed to reset device: %s
+Configured spi max_transfer_size: %zu
+Configured spi bus-%u.camera-%zu.power_ctrl.ioctl.request: %zu
+Failed to configure spi bus-%u.camera-%zu.reset_ctrl.gpio: %u
+Failed to check spi bus-%u.camera-%zu.frame_sync.gpio.properties
+Failed to close: %s
+file does not exist
+mapping keys are not allowed in this context
+[TRACE]
+driver
+gpio
+Checked spi bus-%u.camera-%zu.power_ctrl.gpio.properties.sync: %s
+Configured spi bus-%u.camera-%zu.frame_sync.settling_time_ms: %u
+tag:yaml.org,2002:map
+found invalid Unicode character escape code
+direction
+false
+Configured spi bus-%u.camera-%zu.frame_sync.ioctl.bytes: %zu
+out of memory
+while parsing a tag
+while scanning a quoted scalar
+Unknown spi driver.
+Configured spi bus-%u.camera-%zu.cs: %u
+/dev/spidev%u.%u
+found undefined tag handle
+did not find expected key
+did not find expected comment or line break
+settling_time_ms
+Configured spi bus-%u.camera-%zu.reset_ctrl.settling_time_ms: %u
+Configured spi bus-%u.camera-%zu.reset_ctrl.gpio: %u
+device communication timeout
+Removed from runlist
+did not find the expected '>'
+control characters are not allowed
+unsupported
+ioctl
+Failed to get CID: %s
+value out of range
+invalid error code
+did not find expected <stream-start>
+did not find expected node content
+found unexpected non-alphabetical character
+block sequence entries are not allowed in this context
+mapping values are not allowed in this context
+0.2.2
+found extremely long version number
+while scanning a %TAG directive
+while parsing a %TAG directive
+Failed powering down device: %s
+speed_hz
+Failed to deinitialize frame sync: %s
+Failed to deinitialize reset control: %s
+Failed to meet Maxim minimum firmware version requirement
+found unexpected ':'
+expected low surrogate area
+value
+edge
+Failed to open %s: %s
+Configured spi bus-%u.camera-%zu.power_ctrl.inverting: on
+Configured spi bus-%u.camera-%zu.frame_sync.inverting: off
+found unexpected document indicator
+found a tab character that violate indentation
+/sys/class/gpio/export
+Failed resetting device: %s
+spidev
+Configured spi bus-%u.camera-%zu.frame_sync.gpio: %u
+device busy
+%s/%s/%s
+found undefined alias
+while parsing a flow node
+did not find expected whitespace
+found an indentation indicator equal to 0
+incomplete UTF-16 surrogate pair
+cache
+/sys/class/gpio/unexport
+rising
+CODET
+SPIDMA
+L#x3
+pG	K
+-H-M
+-K-H
+i(FB
+achC
+c`&a
+BhZaZ`
+BhZ`
+fYn!
+` Z{
+`caO
+achC
+lZj 
+dXbpGO
+lZj 
+dXbpG
+ pG.H
+.I.J/K
+,I-J
+`pGO
+`pGo
+`(Fp
+)O*N=
+@"1F F
+ AYC
+"	I F
+@!3K
+LchC
+sc`O
+CODE
+(N(O)L)MA
+ 1%KO
+##hC
+#` K
+a+jC
+HC+bkjC
+3F*F9F
+ vKp
+$!uM
+tKuN
+RKRI
+1F@"FH
+1F=H
+1F,H
+8PC1F
+O%hC
+%h0F
+ AAC
+@"<I<H
+C@KAL
+ 6I7M
+s2J!F
+x#h#
+@1Ch#
+#{`{h
+h;`O
+S{`{h
+CK`Jh\
+!`+`0
+F-JzD
+0369<o
+zphC
+ pG-
+IyD	h	h
+!hHa h@i
+1F(F
+F8FyD
+u$HxD
+F0FyD
+F0FyD
+FyD`
+IyDQ
+\q-hE
+TI FyD
+RIHFyD
+KI FyD
+DI FyD
+AIHFyD
+>IHFyD
+:I FyD
+6IyDKh6I
+2I FyD
+F.HxDGh-I
+:xyD
+*I FyD
+I FyD
+NHF~Dwh
+I FyD
+IHFyD
+IHFyD
+IHFyD
+I FyD
+I FyD
+sI FyD
+XI FyD
+UI FyD
+H`PI FyD
+JHxD
+Gh FIIyD>i
+FIHFyD
+yD:x
+@IHFyD
+Bh<I
+8I FyD
+xyDx`
+/I FyD
+0FyD
+Gh F
+IyD>i
+IHFyD
+yD:x
+IHFyD
+I FyD
+xyDx`
+I FyD
+PF3F
+Gh F
+IyD>i
+IHFyD
+yD:x
+IHFyD
+I FyD
+xyDx`
+I FyD
+{IZF
+PF3F
+vN~DphvIyD
+hIyD
+gI:F
+yD3F
+Bh_I
+ZI FyD
+;iqh h
+KFyD
+qh h
+x7IyD
+7IZF
+PF;F
+Bh/I
+-IZF
+PF;F
+Bh%I
+#IyD
+8F2FSF
+I FyD
+(|D``
+`h$0
+p~DBh
+~DBh
+I FyD
+;iqh h
+KFyD
+qh h
+x}IyDd
+}K}N
+~DBh
+sI FyD
+;iqh h
+KFyD
+qh h
+yD*h
+I=hgFyD
+J)hzD
+KzD{D
+F FyD
+F(F!F
+L|D0F
+F(F!F
+(FyD"F
+=F'k
+ F/F
+=Fgl
+ F/F
+F|Dz
+  FAF
+F|Di
+-21F
+F@HxD
+!Ab h
+% h)F
+IyD	h	h
+&),/2o
+zpxC
+F(FyD
+F(FyD
+ hAi
+F(FyD
+F(FyD
+F(FyD
+IyD	h	h
+F|D!F
+G`i)F
+IyD	h	h
+F]HxD
+`h@j
+`h!F
+`h@i
+ HaHj
+ F%g
+?IyD	h	h
+,/258o
+zppC
+FyD F
+FyD F
+"FyD
+`h@j
+`h!F
+ahHj
+ F)F
+JiiF
+IyD	h	h
+zpHC
+(+.14o
+zppC
+F0FyD
+IyD	h	h
+JyDzD
+IyD	h	h
+yHxD
+8HxDpG
+6HxDpG
+HxDpG
+HxDpG*HxDpG'HxDpG%HxDpG'HxDpG'HxDpG
+HxDpG
+HxDpG
+HxDpG
+HxDpG
+HxDpG
+HxDpG
+HxDpG
+HxDpG	HxDpG
+HxDpG
+HxDpG
+HxDpG
+%~D j)F
+F j9F
+F j9F
+& j1F
+ j)F
+FHHxD
+8JzD
+r*`0`
+1h*hQC"hRh
+F2HxD
+#&),
+"-%03J6(
+IyDQ
+F)HxD
+!$,/
+IyDQ
+,JzD
+"%(+.
+I|DyD#F	h	h
+IyD	h	h
+IyDQ
+PJzD
+orux{g~j
+Y\_beQhT
+&!;F
+FpGO
+IyD	h	h
+0FQFZFO
+QFZF
+FyD F
+4,Ih
+1F*F
+0F)F
+)FJF
+(FIFRF
+F(F1F
+F FyD
+IyD	h	h
+7:=@Co
+zw F
+ F)F
+IyD	h	h
+ `)`
+F FyD
+p!pbp
+FyD F
+IyD	h	h
+"FyD
+>@jFO
+F?Ho
+;IyD	h	h
+FyD F
+I|DyD#F	h	h
+IyD	h	h
+U)FE
+NIyD	h	h
+GJMAPDSY\ad
+3K4H{D
+IyDQ
+"yD	h	h
+(FAFH
+h{DHF
+H{DxD
+gjps
+&(FO
+ABF@#
+F(FyD
+fIyD	h	h
+BF@#
+F FyD
+,K,H{DxD
+FFF F1F
+AJFH
+FxDO
+(FIFO
+F0FyD
+IyD	h	h
+IyDQ
+	IyDQ
+	IyDQ
+IyDQ
+	IyDQ
+;IyD	h	h
+*IyDQ
+08`8F
+I|DyD#F	h	h
+IyD	h	h
+h(($
+IyDQ
+	IyDQ
+HxDpG
+ pG-
+.h h
+(h!h
+<h0h
+8h1h
+0`=`
+)h2hQ
+D1`)h"hQ
+!`(`
+)h:h
+*h9h
+1h"hQ
+D!`1h*hQ
+D)`1h:hQ
+9`0`*h9h
+0h"h)h
+D(`0h `
+@@ff
+(`dF
+ p%e
+  `0F
+ el `
+ `bD
+ %`p
+ %`p
+JAczD
+ pG	
+ `hk
+ g@ 
+  `0F
+ `cD
+ pG	
+!AdpGA
+#AcB
+FxDO
+p?h8F
+Gh8F
+#AcB
+`pG-
+#AcB
+`pG-
+Dh F
+ME9F
+IyD	h	h
+ `cD
+FpG-
+IFRF
+FnJxD
+FnJxD
+ HcA
+((`i
+iF F
+iF F
+IyD	h	h
+8h1F
+I0FyD
+PF9F
+I0FyD
+PF1F
+`PFIF
+PFIF
+}I0FyD
+zHxD
+PF1F
+uPFAF
+PFAF
+FPFAF
+PFAF
+IyD	h	h
+h>FV
+8F1F
+xDyD
+  `(F
+ HcA
+yD	h	h
+FacC
+@h``
+yD	h	h
+(F!F
+yD	h	h
+(F!F
+ Aj(0
+yD	h	h
+(F!F
+yD	h	h
+(F!F
+Gj(0
+yD	h	h
+(F!F
+yD	h	h
+(F!F
+Gj(0
+yD	h	h
+(F!F
+yD	h	h
+(F!F
+"Gj(0
+"fcA
+IyD	h	h
+(F!F
+IyD	h	h
+(F!F
+IyD	h	h
+(F!F
+"ac!FA
+/IyD	h	h
+(F!F
+IyD	h	h
+(F!F
+IyD	h	h
+(F!F
+yjic
+FhcC
+&yjB
+IyD	h	h
+qFZF
+8hQF
+xD+ayD
+ TFO
+ Fcc	#@
+ "FB
+F`cG
+ Fcc	#@
+ "FB
+JxDyD
+ (`_
+p"FR
+h	)P
+Gj(0
+@jhc
+yD}D
+` F)F
+p"FR
+h	)X
+Gj(0
+@jhc
+yD}D
+` F)F
+P"FR
+` FAF
+yD}D
+P"FR
+` FAF
+yD}D
+"gcA
+`(F!F
+(FYFBF
+$(`X
+(FyD
+yD6J
+(FzD
+% F	
+IyD	h	h
+`=`	
+F5FU
+F@F	
+  `8F	
+0F)F	
+FHbA
+K(F@
+8h	h
+22`Z
+11`Q
+;`	#&
+8h	h
+*Ab!F
+*gie
+;`	#4
+8h	h
+7yDP
+;`	#4
+8h	h
+7yDP
+$jmA
+p0]F
+ (`$
+IxDyD
+!*o	
+@x<(@
+8h	h[
+L(0[
+h	hB
+Ax-)!
+x-)@
+hhhhhhhh
+hhhhhhhhhhhhhhhhhh
+NNNNNNNN
+NNNNNNNNNNNNNNNNNN
+$+ojm
+h+g{
+Ax.)
+Bx-*
+Bx.*
+:FXF
+9F_F,
+XF!F:F
+XF:F
+11`Q
+ 0`H
+ 0`H
+<xDQ
+|zDQ
+a+bob)`h`
+ (`$
+8h	h
+K:`@
+XF\F
+bJ]FQ
+7xDQ
+SHxDSIh`yD
+!!=F
+/HxD/Ih`yD
+&H&JQ
+7xDzDQ
+8h	h
+x.)@
+8h	h&
+x]F 
+*`k`
+h	h&
+ljm)gy
+	h8h
+IxDyD
+xxD *H
+YYYYYYYY
+YYYYYYYYYYYYYYYYYY
+ (`6
+DHxD
+yD(b
+xxD *
+00000000
+000000000000000000
+1h:h
+01`Q
+hHhI
+xDyD
+2;h2`
+K:`@
+%H&I
+hxDRiyD
+ JzD
+hyD@i{D
+0hZF
+0h)h
+2F+F
+%]IxD
+,"FR
+!Aa@
+  `:
+hCas
+vzDQ
+:H:J
+vzDQ
+(F9F2F
+p`m!o
+K)`@
+yDzD
+#o+*am
+gaeO
+"oam
+HxDz
+"oam
+#o+)bm
+gbeO
+"oam
+"oam
+#``	
+yD b
+8F1F
+[	R	B
+8F1F
+p`m!o
+K*`@
+IyD	h	h
+vzDQ
+Jx'*(
+p>F+h:h_
+ 	xB
+ 	xB
+ 	xB
+@x	8o(
+ 	xB
+=F:h
+XF)FdF
+PdF;h
+F)xJ
+;h2h
+22`Z
+ 8`*
+ 8`F
+ 8`0h
+ 0`H
+(`3hX
+1F*F
+Ax.)@
+x.)@
+8F*F
+Ax-)
+x-)+
+>F;hP
+fIyD	h	h
+;h*h
+2*`Z
+OHxD
+QHQIxDyD
+NHNIxDyD
+CHxDCIyD
+5H5IxDyD
+K*`@
+oxDyD
+*oim
+xDyD
+a*`h`
+x!)@
+F(pX
+XF1F*F
+p`m!o
+LJxD
+yDzD
+1F*F
+p!o`m
+g`e1
+0FAFZF
+!9])
+(FAFZF
+p`m!o
+1!gQ
+(FAFZF
+x%(@
+l`m&gV
+dge[W
+(HxD
+*HxD&I
+AFZF
+yDzD
+l9hB
+l9hB
+x */
+2*gie
+F	*c
+HF9FZF
+ghe$
+`mHE
+!`mHE
+1	xA
+p mB
+p mB
+0`e0
+BHxD
+>HxD
+:HxD
+D`fO
+	JzD
+09F@"
+eyD h
+IyD	h	h
+"IyDQ
+IyD	h	h
+IyD	h	h
+IyD	h	h
+IyD	h	h
+IyD	h	h
+!i`i
+1hH`5hhh
+ h@h
+%E`!hHi
+&P!h
+`h!i
+!a h
+IyD	h	h
+ a F
+5F0a
+)h(iQ
+!IyD	h	h
+F0FO
+ F9FzD
+JyDzD
+$(`@
+pN`zD+h
+ i%x
+ i%p
+E	(Fp
+IyD	h	h
+(FeD
+qFuE
+2+D2D
+C!DD
+pFsE
+8sEO
+FjFPF
+zqHC
+$iFxD
+$IyD	h	h
+I8FyD
+F0F"F
+KyD{D
+QPJPK|DzD{D F
+Q}D(F
+QIHO
+R~DxD
+Q}D(F
+Q}D(F
+S2I3JxDyDzD
+0HxD
+.HxD
+,HxD
+*HxD
+(HxD
+&HxD
+$HxD
+"HxD
+IyD	xq
+IyD	xq
+HFgq
+ pGBi
+ pG@y
+@	pG
+V9F@
+{2F+F
+%`5F(F
+  `(F
+ pGp
+1F"F
+H!FxD
+iF(F
+IyD	h	h
+iF(F
+IyD	h	h
+I2F8h+FyD
+IyD	h	h
+yD	h	h
+J(F;FzD
+P{D@!@"
+F0F9F@#
+R{DxD
+QxHO
+R{DxD
+jKkH{DxD 
+[K\H{DxD
+P@!@"
+F8FIF2F@#
+QJHO
+R{DxD
+=K>H{DxD
+6K7H{DxD
+P@!@"
+F(F!F@#
+	%PF
+RcFyD	h	h
+ pGn(
+ pG	 pG
+IyD	h	h
+F h@!@"@h
+@!0F
+F(F1F@#
+dJ0FkhzD
+Q{DO
+MHxD
+b{bbbbbbb}
+bbbbb
+BHxD
+?HxD
+@HxD
+P@!@"
+F0F9F@#
+9JzD
+IyDQ
+JyDzD
+IyD	h	h
+(|D$h$h	
+!IyD	h	h
+IyDQ
+F+HO
+&IyD	h	h
+IyDQ
+D`G@
+D`G@
+D`G@
+D`G@
+D`G@
+D`G@
+D`G@
+D`G@
+Android (11349228, +pgo, +bolt, +lto, -mlgo, based on r487747e) clang version 17.0.2 (https://android.googlesource.com/toolchain/llvm-project d9f89f4d16663d5012e5c09495f3b30ece3d2362)
+Linker: LLD 17.0.2
+aeabi
+C2.09
+.note.android.ident
+.note.gnu.build-id
+.dynsym
+.gnu.version
+.gnu.version_r
+.gnu.hash
+.dynstr
+.rel.dyn
+.ARM.exidx
+.rel.plt
+.ARM.extab
+.rodata
+.text
+.plt
+.data.rel.ro
+.fini_array
+.dynamic
+.got
+.got.plt
+.bss
+.comment
+.ARM.attributes
+.shstrtab

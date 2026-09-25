@@ -1,0 +1,357 @@
+====================================================================================================
+CLASS: Lcom/thermal/seekcamera/NativeAndroidTools;
+
+---- METHOD: <init> ()V ----
+  invoke-direct                v0, Ljava/lang/Object;-><init>()V
+  return-void                  
+
+---- METHOD: GetDirectory (Landroid/content/Context;)Ljava/lang/String; ----
+  invoke-virtual               v0, Landroid/content/Context;->getApplicationInfo()Landroid/content/pm/ApplicationInfo;
+  move-result-object           v0
+  iget-object                  v0, v0, Landroid/content/pm/ApplicationInfo;->dataDir Ljava/lang/String;
+  return-object                v0
+====================================================================================================
+CLASS: Lcom/thermal/seekcamera/NativeUsbDevice;
+
+---- METHOD: <init> (Landroid/hardware/usb/UsbDevice; Landroid/hardware/usb/UsbManager; Landroid/content/Context;)V ----
+  invoke-direct                v1, Ljava/lang/Object;-><init>()V
+  const                        v0, 177840
+  new-array                    v0, v0, [B
+  iput-object                  v0, v1, Lcom/thermal/seekcamera/NativeUsbDevice;->bulkTransferArray [B
+  const/16                     v0, 64
+  new-array                    v0, v0, [B
+  iput-object                  v0, v1, Lcom/thermal/seekcamera/NativeUsbDevice;->controlTransferArray [B
+  invoke-direct                v1, Lcom/thermal/seekcamera/NativeUsbDevice;->Cleanup()V
+  iput-object                  v2, v1, Lcom/thermal/seekcamera/NativeUsbDevice;->device Landroid/hardware/usb/UsbDevice;
+  iput-object                  v3, v1, Lcom/thermal/seekcamera/NativeUsbDevice;->manager Landroid/hardware/usb/UsbManager;
+  iput-object                  v4, v1, Lcom/thermal/seekcamera/NativeUsbDevice;->context Landroid/content/Context;
+  const/4                      v2, 0
+  iput-object                  v2, v1, Lcom/thermal/seekcamera/NativeUsbDevice;->connection Landroid/hardware/usb/UsbDeviceConnection;
+  iget-object                  v2, v1, Lcom/thermal/seekcamera/NativeUsbDevice;->controlTransferArray [B
+  iget-object                  v3, v1, Lcom/thermal/seekcamera/NativeUsbDevice;->bulkTransferArray [B
+  invoke-direct                v1, v2, v3, Lcom/thermal/seekcamera/NativeUsbDevice;->initializeTransferArrays([B [B)V
+  const/4                      v2, 0
+  iput-boolean                 v2, v1, Lcom/thermal/seekcamera/NativeUsbDevice;->isOpen Z
+  const/16                     v2, 1250
+  iput                         v2, v1, Lcom/thermal/seekcamera/NativeUsbDevice;->usbTimeout I
+  return-void                  
+
+---- METHOD: Cleanup ()V ----
+  const/4                      v0, 0
+  iput-object                  v0, v1, Lcom/thermal/seekcamera/NativeUsbDevice;->device Landroid/hardware/usb/UsbDevice;
+  iput-object                  v0, v1, Lcom/thermal/seekcamera/NativeUsbDevice;->connection Landroid/hardware/usb/UsbDeviceConnection;
+  iput-object                  v0, v1, Lcom/thermal/seekcamera/NativeUsbDevice;->ctlEp Landroid/hardware/usb/UsbEndpoint;
+  iput-object                  v0, v1, Lcom/thermal/seekcamera/NativeUsbDevice;->bulkInEp Landroid/hardware/usb/UsbEndpoint;
+  iput-object                  v0, v1, Lcom/thermal/seekcamera/NativeUsbDevice;->context Landroid/content/Context;
+  return-void                  
+
+---- METHOD: initializeTransferArrays ([B [B)V ----
+
+---- METHOD: BulkTransfer (I B I)I ----
+  const/4                      v8, -1
+  if-nez                       v7, +003h
+  return                       v8
+  const/4                      v7, 0
+  if-lez                       v9, +01bh
+  iget-object                  v0, v6, Lcom/thermal/seekcamera/NativeUsbDevice;->connection Landroid/hardware/usb/UsbDeviceConnection;
+  iget-object                  v1, v6, Lcom/thermal/seekcamera/NativeUsbDevice;->bulkInEp Landroid/hardware/usb/UsbEndpoint;
+  iget-object                  v2, v6, Lcom/thermal/seekcamera/NativeUsbDevice;->bulkTransferArray [B
+  const/16                     v3, 16224
+  invoke-static                v3, v9, Ljava/lang/Math;->min(I I)I
+  move-result                  v4
+  iget                         v5, v6, Lcom/thermal/seekcamera/NativeUsbDevice;->usbTimeout I
+  move                         v3, v7
+  invoke-virtual/range         v0 ... v5, Landroid/hardware/usb/UsbDeviceConnection;->bulkTransfer(Landroid/hardware/usb/UsbEndpoint; [B I I I)I
+  move-result                  v0
+  if-gez                       v0, +003h
+  return                       v8
+  sub-int/2addr                v9, v0
+  add-int/2addr                v7, v0
+  goto                         -1ah
+  return                       v7
+
+---- METHOD: Close ()V ----
+  const/4                      v0, 0
+  iput-boolean                 v0, v3, Lcom/thermal/seekcamera/NativeUsbDevice;->isOpen Z
+  iget-object                  v1, v3, Lcom/thermal/seekcamera/NativeUsbDevice;->connection Landroid/hardware/usb/UsbDeviceConnection;
+  iget-object                  v2, v3, Lcom/thermal/seekcamera/NativeUsbDevice;->device Landroid/hardware/usb/UsbDevice;
+  invoke-virtual               v2, v0, Landroid/hardware/usb/UsbDevice;->getInterface(I)Landroid/hardware/usb/UsbInterface;
+  move-result-object           v0
+  invoke-virtual               v1, v0, Landroid/hardware/usb/UsbDeviceConnection;->releaseInterface(Landroid/hardware/usb/UsbInterface;)Z
+  iget-object                  v0, v3, Lcom/thermal/seekcamera/NativeUsbDevice;->connection Landroid/hardware/usb/UsbDeviceConnection;
+  invoke-virtual               v0, Landroid/hardware/usb/UsbDeviceConnection;->close()V
+  invoke-direct                v3, Lcom/thermal/seekcamera/NativeUsbDevice;->Cleanup()V
+  return-void                  
+
+---- METHOD: ControlTransfer (I B I)I ----
+  const/4                      v0, 1
+  if-ne                        v9, v0, +005h
+  const/16                     v9, -128
+  goto                         +2h
+  const/4                      v9, 0
+  or-int/lit8                  v9, v9, 64
+  int-to-byte                  v1, v9
+  iget-object                  v0, v8, Lcom/thermal/seekcamera/NativeUsbDevice;->connection Landroid/hardware/usb/UsbDeviceConnection;
+  iget-object                  v5, v8, Lcom/thermal/seekcamera/NativeUsbDevice;->controlTransferArray [B
+  iget                         v7, v8, Lcom/thermal/seekcamera/NativeUsbDevice;->usbTimeout I
+  const/4                      v3, 0
+  const/4                      v4, 0
+  move                         v2, v10
+  move                         v6, v11
+  invoke-virtual/range         v0 ... v7, Landroid/hardware/usb/UsbDeviceConnection;->controlTransfer(I I I I [B I I)I
+  move-result                  v8
+  return                       v8
+
+---- METHOD: GetChipID ()V ----
+  iget-boolean                 v0, v5, Lcom/thermal/seekcamera/NativeUsbDevice;->isOpen Z
+  if-eqz                       v0, +047h
+  const/16                     v0, 12
+  new-array                    v1, v0, [B
+  const/16                     v2, 54
+  const/4                      v3, 1
+  invoke-virtual               v5, v3, v2, v0, Lcom/thermal/seekcamera/NativeUsbDevice;->ControlTransfer(I B I)I
+  move-result                  v5
+  new-instance                 v2, Ljava/lang/StringBuilder;
+  invoke-direct                v2, Ljava/lang/StringBuilder;-><init>()V
+  const-string                 v3, "firmwareinfo result: "
+  invoke-virtual               v2, v3, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+  invoke-virtual               v2, v5, Ljava/lang/StringBuilder;->append(I)Ljava/lang/StringBuilder;
+  invoke-virtual               v2, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
+  move-result-object           v5
+  const-string                 v2, "SeekwareAAR"
+  invoke-static                v2, v5, Landroid/util/Log;->d(Ljava/lang/String; Ljava/lang/String;)I
+  const/4                      v5, 0
+  if-ge                        v5, v0, +023h
+  new-instance                 v3, Ljava/lang/StringBuilder;
+  invoke-direct                v3, Ljava/lang/StringBuilder;-><init>()V
+  const-string                 v4, "bytes["
+  invoke-virtual               v3, v4, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+  invoke-virtual               v3, v5, Ljava/lang/StringBuilder;->append(I)Ljava/lang/StringBuilder;
+  const-string                 v4, "]="
+  invoke-virtual               v3, v4, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+  aget-byte                    v4, v1, v5
+  invoke-virtual               v3, v4, Ljava/lang/StringBuilder;->append(I)Ljava/lang/StringBuilder;
+  invoke-virtual               v3, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
+  move-result-object           v3
+  invoke-static                v2, v3, Landroid/util/Log;->d(Ljava/lang/String; Ljava/lang/String;)I
+  add-int/lit8                 v5, v5, 1
+  goto                         -22h
+  return-void                  
+
+---- METHOD: GetTimeout ()I ----
+  iget                         v0, v0, Lcom/thermal/seekcamera/NativeUsbDevice;->usbTimeout I
+  return                       v0
+
+---- METHOD: IsOpened ()Z ----
+  iget-boolean                 v0, v0, Lcom/thermal/seekcamera/NativeUsbDevice;->isOpen Z
+  return                       v0
+
+---- METHOD: Open ()Z ----
+  iget-object                  v0, v5, Lcom/thermal/seekcamera/NativeUsbDevice;->device Landroid/hardware/usb/UsbDevice;
+  const/4                      v1, 0
+  invoke-virtual               v0, v1, Landroid/hardware/usb/UsbDevice;->getInterface(I)Landroid/hardware/usb/UsbInterface;
+  move-result-object           v0
+  invoke-virtual               v0, v1, Landroid/hardware/usb/UsbInterface;->getEndpoint(I)Landroid/hardware/usb/UsbEndpoint;
+  move-result-object           v2
+  iput-object                  v2, v5, Lcom/thermal/seekcamera/NativeUsbDevice;->ctlEp Landroid/hardware/usb/UsbEndpoint;
+  const/4                      v2, 1
+  invoke-virtual               v0, v2, Landroid/hardware/usb/UsbInterface;->getEndpoint(I)Landroid/hardware/usb/UsbEndpoint;
+  move-result-object           v3
+  iput-object                  v3, v5, Lcom/thermal/seekcamera/NativeUsbDevice;->bulkInEp Landroid/hardware/usb/UsbEndpoint;
+  iget-object                  v3, v5, Lcom/thermal/seekcamera/NativeUsbDevice;->manager Landroid/hardware/usb/UsbManager;
+  iget-object                  v4, v5, Lcom/thermal/seekcamera/NativeUsbDevice;->device Landroid/hardware/usb/UsbDevice;
+  invoke-virtual               v3, v4, Landroid/hardware/usb/UsbManager;->openDevice(Landroid/hardware/usb/UsbDevice;)Landroid/hardware/usb/UsbDeviceConnection;
+  move-result-object           v3
+  iput-object                  v3, v5, Lcom/thermal/seekcamera/NativeUsbDevice;->connection Landroid/hardware/usb/UsbDeviceConnection;
+  if-nez                       v3, +008h
+  invoke-direct                v5, Lcom/thermal/seekcamera/NativeUsbDevice;->Cleanup()V
+  iput-boolean                 v1, v5, Lcom/thermal/seekcamera/NativeUsbDevice;->isOpen Z
+  return                       v1
+  invoke-virtual               v3, v0, v2, Landroid/hardware/usb/UsbDeviceConnection;->claimInterface(Landroid/hardware/usb/UsbInterface; Z)Z
+  iput-boolean                 v2, v5, Lcom/thermal/seekcamera/NativeUsbDevice;->isOpen Z
+  return                       v2
+
+---- METHOD: SetTimeout (I)V ----
+  iput                         v1, v0, Lcom/thermal/seekcamera/NativeUsbDevice;->usbTimeout I
+  return-void                  
+====================================================================================================
+CLASS: Lcom/thermal/seekcamera/NativeUsbDeviceManager$a;
+
+---- METHOD: <init> ()V ----
+  invoke-direct                v0, Landroid/content/BroadcastReceiver;-><init>()V
+  return-void                  
+
+---- METHOD: onReceive (Landroid/content/Context; Landroid/content/Intent;)V ----
+  const-string                 v3, "SeekwareAAR"
+  const-string                 v0, "BroadcastReceiver::onReceive()"
+  invoke-static                v3, v0, Landroid/util/Log;->d(Ljava/lang/String; Ljava/lang/String;)I
+  invoke-virtual               v4, Landroid/content/Intent;->getAction()Ljava/lang/String;
+  move-result-object           v3
+  const-string                 v0, "com.android.example.USB_PERMISSION"
+  invoke-virtual               v0, v3, Ljava/lang/String;->equals(Ljava/lang/Object;)Z
+  move-result                  v3
+  if-eqz                       v3, +030h
+  monitor-enter                v2
+  const-string                 v3, "device"
+  invoke-virtual               v4, v3, Landroid/content/Intent;->getParcelableExtra(Ljava/lang/String;)Landroid/os/Parcelable;
+  move-result-object           v3
+  check-cast                   v3, Landroid/hardware/usb/UsbDevice;
+  const-string                 v0, "permission"
+  const/4                      v1, 0
+  invoke-virtual               v4, v0, v1, Landroid/content/Intent;->getBooleanExtra(Ljava/lang/String; Z)Z
+  move-result                  v4
+  if-eqz                       v4, +003h
+  goto                         +17h
+  const-string                 v4, "SeekwareAAR"
+  new-instance                 v0, Ljava/lang/StringBuilder;
+  invoke-direct                v0, Ljava/lang/StringBuilder;-><init>()V
+  const-string                 v1, "permission denied for device "
+  invoke-virtual               v0, v1, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+  invoke-virtual               v0, v3, Ljava/lang/StringBuilder;->append(Ljava/lang/Object;)Ljava/lang/StringBuilder;
+  invoke-virtual               v0, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
+  move-result-object           v3
+  invoke-static                v4, v3, Landroid/util/Log;->d(Ljava/lang/String; Ljava/lang/String;)I
+  monitor-exit                 v2
+  goto                         +4h
+  move-exception               v3
+  monitor-exit                 v2
+  throw                        v3
+  return-void                  
+====================================================================================================
+CLASS: Lcom/thermal/seekcamera/NativeUsbDeviceManager;
+
+---- METHOD: <init> (Landroid/content/Context;)V ----
+  invoke-direct                v1, Ljava/lang/Object;-><init>()V
+  const/16                     v0, 10397
+  iput                         v0, v1, Lcom/thermal/seekcamera/NativeUsbDeviceManager;->SEEKUSB_VENDOR_ID I
+  new-instance                 v0, Lcom/thermal/seekcamera/NativeUsbDeviceManager$a;
+  invoke-direct                v0, Lcom/thermal/seekcamera/NativeUsbDeviceManager$a;-><init>()V
+  iput-object                  v0, v1, Lcom/thermal/seekcamera/NativeUsbDeviceManager;->usbReceiver Landroid/content/BroadcastReceiver;
+  iput-object                  v2, v1, Lcom/thermal/seekcamera/NativeUsbDeviceManager;->context Landroid/content/Context;
+  const-string                 v0, "usb"
+  invoke-virtual               v2, v0, Landroid/content/Context;->getSystemService(Ljava/lang/String;)Ljava/lang/Object;
+  move-result-object           v2
+  check-cast                   v2, Landroid/hardware/usb/UsbManager;
+  iput-object                  v2, v1, Lcom/thermal/seekcamera/NativeUsbDeviceManager;->manager Landroid/hardware/usb/UsbManager;
+  const/4                      v2, 0
+  iput-object                  v2, v1, Lcom/thermal/seekcamera/NativeUsbDeviceManager;->seekdev Landroid/hardware/usb/UsbDevice;
+  const-string                 v1, "SeekwareAAR"
+  const-string                 v2, "NativeUsbDeviceManager()"
+  invoke-static                v1, v2, Landroid/util/Log;->d(Ljava/lang/String; Ljava/lang/String;)I
+  return-void                  
+
+---- METHOD: CreateDevice (I)Lcom/thermal/seekcamera/NativeUsbDevice; ----
+  iget-object                  v0, v3, Lcom/thermal/seekcamera/NativeUsbDeviceManager;->manager Landroid/hardware/usb/UsbManager;
+  invoke-virtual               v0, Landroid/hardware/usb/UsbManager;->getDeviceList()Ljava/util/HashMap;
+  move-result-object           v0
+  invoke-virtual               v0, Ljava/util/HashMap;->entrySet()Ljava/util/Set;
+  move-result-object           v0
+  invoke-interface             v0, Ljava/util/Set;->iterator()Ljava/util/Iterator;
+  move-result-object           v0
+  invoke-interface             v0, Ljava/util/Iterator;->hasNext()Z
+  move-result                  v1
+  if-eqz                       v1, +024h
+  invoke-interface             v0, Ljava/util/Iterator;->next()Ljava/lang/Object;
+  move-result-object           v1
+  check-cast                   v1, Ljava/util/Map$Entry;
+  invoke-interface             v1, Ljava/util/Map$Entry;->getValue()Ljava/lang/Object;
+  move-result-object           v2
+  check-cast                   v2, Landroid/hardware/usb/UsbDevice;
+  invoke-virtual               v2, Landroid/hardware/usb/UsbDevice;->getDeviceId()I
+  move-result                  v2
+  if-ne                        v2, v4, -016h
+  new-instance                 v4, Lcom/thermal/seekcamera/NativeUsbDevice;
+  invoke-interface             v1, Ljava/util/Map$Entry;->getValue()Ljava/lang/Object;
+  move-result-object           v0
+  check-cast                   v0, Landroid/hardware/usb/UsbDevice;
+  iget-object                  v1, v3, Lcom/thermal/seekcamera/NativeUsbDeviceManager;->manager Landroid/hardware/usb/UsbManager;
+  iget-object                  v3, v3, Lcom/thermal/seekcamera/NativeUsbDeviceManager;->context Landroid/content/Context;
+  invoke-direct                v4, v0, v1, v3, Lcom/thermal/seekcamera/NativeUsbDevice;-><init>(Landroid/hardware/usb/UsbDevice; Landroid/hardware/usb/UsbManager; Landroid/content/Context;)V
+  return-object                v4
+  const/4                      v3, 0
+  return-object                v3
+
+---- METHOD: FindDevices ()[I ----
+  new-instance                 v0, Ljava/util/ArrayList;
+  invoke-direct                v0, Ljava/util/ArrayList;-><init>()V
+  iget-object                  v1, v5, Lcom/thermal/seekcamera/NativeUsbDeviceManager;->manager Landroid/hardware/usb/UsbManager;
+  invoke-virtual               v1, Landroid/hardware/usb/UsbManager;->getDeviceList()Ljava/util/HashMap;
+  move-result-object           v1
+  invoke-virtual               v1, Ljava/util/HashMap;->entrySet()Ljava/util/Set;
+  move-result-object           v1
+  invoke-interface             v1, Ljava/util/Set;->iterator()Ljava/util/Iterator;
+  move-result-object           v1
+  invoke-interface             v1, Ljava/util/Iterator;->hasNext()Z
+  move-result                  v2
+  if-eqz                       v2, +036h
+  invoke-interface             v1, Ljava/util/Iterator;->next()Ljava/lang/Object;
+  move-result-object           v2
+  check-cast                   v2, Ljava/util/Map$Entry;
+  iget-object                  v3, v5, Lcom/thermal/seekcamera/NativeUsbDeviceManager;->manager Landroid/hardware/usb/UsbManager;
+  invoke-interface             v2, Ljava/util/Map$Entry;->getValue()Ljava/lang/Object;
+  move-result-object           v4
+  check-cast                   v4, Landroid/hardware/usb/UsbDevice;
+  invoke-virtual               v3, v4, Landroid/hardware/usb/UsbManager;->hasPermission(Landroid/hardware/usb/UsbDevice;)Z
+  move-result                  v3
+  if-eqz                       v3, -018h
+  invoke-interface             v2, Ljava/util/Map$Entry;->getValue()Ljava/lang/Object;
+  move-result-object           v3
+  check-cast                   v3, Landroid/hardware/usb/UsbDevice;
+  invoke-virtual               v3, Landroid/hardware/usb/UsbDevice;->getVendorId()I
+  move-result                  v3
+  const/16                     v4, 10397
+  if-ne                        v3, v4, -026h
+  invoke-interface             v2, Ljava/util/Map$Entry;->getValue()Ljava/lang/Object;
+  move-result-object           v2
+  check-cast                   v2, Landroid/hardware/usb/UsbDevice;
+  invoke-virtual               v2, Landroid/hardware/usb/UsbDevice;->getDeviceId()I
+  move-result                  v2
+  invoke-static                v2, Ljava/lang/Integer;->valueOf(I)Ljava/lang/Integer;
+  move-result-object           v2
+  invoke-virtual               v0, v2, Ljava/util/ArrayList;->add(Ljava/lang/Object;)Z
+  goto                         -39h
+  invoke-virtual               v0, Ljava/util/ArrayList;->size()I
+  move-result                  v5
+  new-array                    v5, v5, [I
+  invoke-virtual               v0, Ljava/util/ArrayList;->iterator()Ljava/util/Iterator;
+  move-result-object           v0
+  const/4                      v1, 0
+  invoke-interface             v0, Ljava/util/Iterator;->hasNext()Z
+  move-result                  v2
+  if-eqz                       v2, +011h
+  invoke-interface             v0, Ljava/util/Iterator;->next()Ljava/lang/Object;
+  move-result-object           v2
+  check-cast                   v2, Ljava/lang/Integer;
+  invoke-virtual               v2, Ljava/lang/Integer;->intValue()I
+  move-result                  v2
+  aput                         v2, v5, v1
+  add-int/lit8                 v1, v1, 1
+  goto                         -14h
+  return-object                v5
+
+---- METHOD: initializeNativeFSDataDir (Ljava/lang/String;)V ----
+
+---- METHOD: initializeNativeUsbDeviceManager (Lcom/thermal/seekcamera/NativeUsbDeviceManager;)V ----
+====================================================================================================
+CLASS: Lcom/thermal/seeknano/MainActivity;
+
+---- METHOD: <clinit> ()V ----
+  const-string                 v0, "seekcamera"
+  invoke-static                v0, Ljava/lang/System;->loadLibrary(Ljava/lang/String;)V
+  return-void                  
+
+---- METHOD: <init> ()V ----
+  invoke-direct                v0, Lb6/d;-><init>()V
+  return-void                  
+
+---- METHOD: q (Lio/flutter/embedding/engine/a;)V ----
+  new-instance                 v0, Lcom/thermal/seekcamera/NativeUsbDeviceManager;
+  invoke-direct                v0, v1, Lcom/thermal/seekcamera/NativeUsbDeviceManager;-><init>(Landroid/content/Context;)V
+  iput-object                  v0, v1, Lcom/thermal/seeknano/MainActivity;->j Lcom/thermal/seekcamera/NativeUsbDeviceManager;
+  invoke-virtual               v0, v0, Lcom/thermal/seekcamera/NativeUsbDeviceManager;->initializeNativeUsbDeviceManager(Lcom/thermal/seekcamera/NativeUsbDeviceManager;)V
+  iget-object                  v0, v1, Lcom/thermal/seeknano/MainActivity;->j Lcom/thermal/seekcamera/NativeUsbDeviceManager;
+  invoke-static                v1, Lcom/thermal/seekcamera/NativeAndroidTools;->GetDirectory(Landroid/content/Context;)Ljava/lang/String;
+  move-result-object           v1
+  invoke-virtual               v0, v1, Lcom/thermal/seekcamera/NativeUsbDeviceManager;->initializeNativeFSDataDir(Ljava/lang/String;)V
+  invoke-static                v2, Lio/flutter/plugins/GeneratedPluginRegistrant;->registerWith(Lio/flutter/embedding/engine/a;)V
+  return-void                  

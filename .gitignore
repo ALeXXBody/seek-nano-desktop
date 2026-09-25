@@ -1,0 +1,9 @@
+*.apk
+*.xapk
+*.keystore
+decoded/
+xapk/
+base/
+base.apk/
+build/
+__pycache__/

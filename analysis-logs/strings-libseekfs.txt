@@ -1,0 +1,152 @@
+Android
+r26d
+11579264
+a.\j
+ex<Z
+__cxa_finalize
+__cxa_atexit
+__register_atfork
+seekfs_load_jvm
+seekfs_directory_exists
+seekfs_file_exists
+seekfs_read_file
+__stack_chk_fail
+fopen
+fread
+ferror
+__errno
+fclose
+__stack_chk_guard
+seekfs_file_get_size
+seekfs_write_file
+fwrite
+seekfs_append_file
+seekfs_make_directory
+seekfs_copy_file
+__fwrite_chk
+feof
+seekfs_copy_directory
+seekfs_join_path
+seekfs_remove_file
+remove
+seekfs_get_absolute_path
+__vsnprintf_chk
+seekfs_validate_path
+strlen
+seekfs_global_setup_directory_structure
+seekfs_get_base_directory_path
+__strncpy_chk2
+seekfs_get_cache_directory_path
+seekfs_get_cal_directory_path
+seekfs_get_conf_directory_path
+seekfs_get_log_directory_path
+seekfs_get_error_str
+Java_com_thermal_seekcamera_NativeUsbDeviceManager_initializeNativeFSDataDir
+access
+stat
+opendir
+readdir
+strcmp
+closedir
+realpath
+memset
+libc.so
+LIBC
+LIBC_N
+libseekfs.so
+conf
+success
+invalid parameter
+file read failure
+file write failure
+feature not supported
+system call failure
+directory does not exist
+unknown error
+request cannot be performed
+.seekthermal
+%s%s%s
+insufficient permissions
+not implemented
+file does not exist
+out of memory
+invalid error code
+cache
+$IyD	h	h
+I8FyD
+F0F"F
+!*F#F
+!*F#F
+ pG-
+1I(FyD
+F FyD
+$IyD	h	h
+h0FO
+!:F#F
+KzD{D
+0F)F"F
+KyD{D
+QHRIRLxDyD|D
+Q}D(F
+QIHO
+R~DxD
+Q}D(F
+Q}D(F
+S2I3JxDyDzD
+0HxD
+.HxD
+,HxD
+*HxD
+(HxD
+&HxD
+$HxD
+"HxD
+IyD	xa
+IyD	xq
+IyD	xq
+IyD	xq
+IyD	xq
+IyDQ
+HxDpG
+H!FxD
+IyDH`pG:v
+iF(F
+IyD	h	h
+iF(F
+IyD	h	h
+ pG-
+GIyD	h	h
+#L$I|DyD
+	!FHF
+RIFO
+FDF@F
+SBF5F
+I2F8h+FyD
+IyD	h	h
+Android (11349228, +pgo, +bolt, +lto, -mlgo, based on r487747e) clang version 17.0.2 (https://android.googlesource.com/toolchain/llvm-project d9f89f4d16663d5012e5c09495f3b30ece3d2362)
+Linker: LLD 17.0.2
+aeabi
+C2.09
+.note.android.ident
+.note.gnu.build-id
+.dynsym
+.gnu.version
+.gnu.version_r
+.gnu.hash
+.dynstr
+.rel.dyn
+.ARM.exidx
+.rel.plt
+.ARM.extab
+.rodata
+.text
+.plt
+.data.rel.ro
+.fini_array
+.dynamic
+.got
+.got.plt
+.bss
+.comment
+.ARM.attributes
+.shstrtab
