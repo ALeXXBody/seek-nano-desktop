@@ -184,7 +184,7 @@ class Viewer(wx.Frame):
         self.video.SetBackgroundColour(wx.BLACK)
         self.video.Bind(wx.EVT_PAINT, self.on_paint)
         self.log = wx.TextCtrl(split, style=wx.TE_MULTILINE | wx.TE_READONLY |
-                               wx.TE_DONTWRAP | wx.TE_DONTEPLETE)
+                               wx.TE_DONTWRAP)
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(top, 0, wx.EXPAND)
         sizer.Add(split, 1, wx.EXPAND)
