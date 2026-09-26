@@ -174,6 +174,7 @@ class Viewer:
         cv2.namedWindow("Seek Nano log", cv2.WINDOW_NORMAL)
         cv2.resizeWindow("Seek Nano log", 900, 500)
         self.log_tail = []
+        self.hist = []
 
     def put(self, msg):
         self.q.append(msg)
