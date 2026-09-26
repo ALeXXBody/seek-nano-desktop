@@ -97,17 +97,26 @@ class Stream(threading.Thread):
             self.ctrl_out(0x3c, b"\x01\x00")
             self.ctrl_in(0x3d, 2)
 
+            kicks = 0
             while not self.stop_flag.is_set():
-                self.ctrl_out(0x53, b"\x58\x5b\x01\x00")
-                rc = self.ctrl_in(0x35, 4)
-                if rc == b"\x00\x00\x00\x00":
-                    time.sleep(0.001)
+                for _ in range(3):
+                    self.ctrl_out(0x53, b"\x58\x5b\x01\x00")
+                    rc = self.ctrl_in(0x35, 4)
+                    if rc != b"\x00\x00\x00\x00":
+                        break
+                    time.sleep(0.002)
+                try:
+                    buf = bytearray()
+                    while len(buf) < FRAME_BYTES and not self.stop_flag.is_set():
+                        buf.extend(dev.read(BULK_EP, CHUNK, 1250))
+                except usb.core.USBError as ue:
+                    self.put(("info", f"no frame yet (kicked). [{type(ue).__name__}]"))
                     continue
-                buf = bytearray()
-                while len(buf) < FRAME_BYTES and not self.stop_flag.is_set():
-                    buf.extend(dev.read(BULK_EP, CHUNK, 1250))
                 if len(buf) == FRAME_BYTES:
                     self.put(("frame", bytes(buf)))
+                    self.put(("info", f"frame ok ({len(buf)} B)"))
+                else:
+                    self.put(("info", f"short frame {len(buf)} B"))
         except Exception as e:
             self.put(("error", f"{type(e).__name__}: {e}"))
         finally:
