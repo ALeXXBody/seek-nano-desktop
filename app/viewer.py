@@ -98,13 +98,18 @@ class Stream(threading.Thread):
             self.ctrl_in(0x3d, 2)
 
             kicks = 0
+            WARMUP = 70          # capture showed ~60 kicks before first frame
             while not self.stop_flag.is_set():
                 for _ in range(3):
                     self.ctrl_out(0x53, b"\x58\x5b\x01\x00")
                     rc = self.ctrl_in(0x35, 4)
+                    kicks += 1
                     if rc != b"\x00\x00\x00\x00":
+                        self.put(("info", f"kick {kicks} -> status {rc.hex()}"))
                         break
                     time.sleep(0.002)
+                if kicks < WARMUP:
+                    continue
                 try:
                     buf = bytearray()
                     while len(buf) < FRAME_BYTES and not self.stop_flag.is_set():
