@@ -69,6 +69,10 @@ class Stream(threading.Thread):
 
     def trace(self, line):
         self.log.write(f"{time.time():.3f} {line}\n")
+        try:
+            self.put(("log", line))
+        except Exception:
+            pass
 
     def ctrl_out(self, request, payload):
         self.trace(f"W req=0x{request:02x} data={payload.hex()} ret=?")
@@ -167,10 +171,11 @@ class Viewer:
         self.msg = "connect Seek Nano, then press s"
         cv2.namedWindow("Seek Nano Viewer", cv2.WINDOW_NORMAL)
         cv2.resizeWindow("Seek Nano Viewer", 400, 380)
+        cv2.namedWindow("Seek Nano log", cv2.WINDOW_NORMAL)
+        cv2.resizeWindow("Seek Nano log", 900, 500)
+        self.log_tail = []
 
     def put(self, msg):
-        if self.q:
-            self.q.pop()
         self.q.append(msg)
 
     def toggle_stream(self):
@@ -188,14 +193,18 @@ class Viewer:
             kind, payload = self.q.pop(0)
             if kind == "frame":
                 self.frame = payload
-            elif kind == "info":
+            elif kind in ("info", "error", "log"):
                 self.msg = payload
-            elif kind == "error":
-                self.msg = f"ERROR: {payload}"
-                self.stream = None
+                self.hist.append(f"{time.time()%100:8.2f} {payload}")
+                self.hist = self.hist[-14:]
         self.draw()
 
     def draw(self):
+        # log pane window (copy by reading seeknano_verbose.log; kept on-screen too)
+        logbuf = np.zeros((500, 900, 3), dtype=np.uint8)
+        for i, line in enumerate(self.hist[-14:]):
+            cv2.putText(logbuf, line[:110], (10, 30 + i*28), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 210, 100), 1, cv2.LINE_AA)
+        cv2.imshow("Seek Nano log", logbuf)
         if self.frame is None:
             base = np.zeros((H*2, W*2, 3), dtype=np.uint8)
             cv2.putText(base, self.msg, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (30, 230, 255), 1, cv2.LINE_AA)
