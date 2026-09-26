@@ -31,13 +31,14 @@ jobs:
             app/viewer.py
         shell: powershell
 
-      - name: upload artifact + release
+      - name: upload release
         run: |
-          $tag = "${{ github.ref_name }}"
-          if ($tag -notlike "v*") { $tag = "v0.2.0-manual" }
-          gh release create "$tag" dist/SeekNano.exe --repo ${{ github.repository }} `
-            --title "Seek Nano Viewer $tag" `
-            --notes "Download, run, plug the Nano in. First-time Windows driver step: install the libusb-win32/WinUSB driver with Zadig (see README)." || gh release upload "$tag" dist/SeekNano.exe --repo ${{ github.repository }} --clobber
+          TAG="${GITHUB_REF_NAME}"
+          case "$TAG" in v*) ;; *) TAG="v0.2.0-manual";; esac
+          gh release create "$TAG" dist/SeekNano.exe --repo "$GITHUB_REPOSITORY" \
+            --title "Seek Nano Viewer $TAG" \
+            --notes "Download, run, plug the Nano in. First-time Windows driver step: install the libusb-win32/WinUSB driver with Zadig (see README)." || \
+            gh release upload "$TAG" dist/SeekNano.exe --repo "$GITHUB_REPOSITORY" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: powershell
+        shell: bash
