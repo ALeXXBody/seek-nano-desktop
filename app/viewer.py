@@ -61,6 +61,34 @@ def gray_lut(t):
 
 COLORMAPS = [("ironbow", ironbow), ("hot", hot_lut), ("grayscale", gray_lut)]
 
+CFG_FILE = "seeknano_geom.json"
+
+
+def auto_geometry(frame_raw):
+    """Find (width, height, byte_offset) maximizing 2D sharpness of the u16 array.
+    Rows/cols that look like padding (near constant) penalize wrong layouts."""
+    import math
+    arr = np.frombuffer(frame_raw, dtype="<u2").astype(np.float32)
+    n = len(arr)
+    divs = [d for d in range(100, 700) if n % d == 0]
+    best = None
+    for W in divs:
+        H = n // W
+        if H < 80 or H > 700:
+            continue
+        try:
+            img = arr.reshape(H, W)
+        except ValueError:
+            continue
+        gradH = np.abs(np.diff(img[:, :min(W, 340)], axis=1)).mean()
+        gradV = np.abs(np.diff(img[:, :min(W, 340)], axis=0)).mean()
+        sharpness = gradH + gradV
+        if best is None or sharpness > best[0]:
+            best = (sharpness, W, H)
+    if best:
+        return best[1], best[2]
+    return 360, 247
+
 
 class Stream(threading.Thread):
     def __init__(self, q, status_cb):
@@ -130,38 +158,21 @@ class Stream(threading.Thread):
             kicks = 0
             while not self.stop_flag.is_set():
                 self.ctrl_out(0x53, b"\x58\x5b\x01\x00")
-                rc = self.ctrl_in(0x35, 4)
                 kicks += 1
-                if rc != b"\x00\x00\x00\x00":
-                    self.trace("kick %d status %s" % (kicks, rc.hex()))
-                if kicks < 70:
-                    time.sleep(0.002)
-                    continue
-                if not eps:
-                    self.put(("error", "no bulk-in endpoint found on device"))
-                    return
-                iface_n, ep_addr = eps[self.ep_i % len(eps)]
-                self.ep_i += 1
                 try:
                     buf = bytearray()
-                    got_any = False
                     while len(buf) < FRAME_BYTES and not self.stop_flag.is_set():
-                        try:
-                            buf.extend(dev.read(ep_addr, CHUNK, 300))
-                            got_any = True
-                        except usb.core.USBError as timeout_err:
-                            if not got_any:
-                                raise
-                            # mid-frame timeout: switch to next chunk ok
-                            continue
+                        buf.extend(dev.read(ep_addr, CHUNK, 500))
                 except usb.core.USBError as ue:
-                    self.trace("BULK FAIL (iface=%d ep=%#x) %s: %s" % (iface_n, ep_addr, type(ue).__name__, ue))
-                    self.put(("log", "iface %d ep %s -> FAIL (%s)" % (iface_n, hex(ep_addr), type(ue).__name__)))
+                    self.trace("BULK FAIL %s: %s" % (type(ue).__name__, ue))
+                    if kicks % 20 == 0:
+                        self.put(("log", f"kick {kicks}: {type(ue).__name__}"))
                     continue
                 if len(buf) == FRAME_BYTES:
-                    self.q.put(("frame", bytes(buf)))
+                    self.put(("frame", bytes(buf)))
+                    self.put(("info", f"frame {kicks} ok"))
                 else:
-                    self.trace("short frame %d B" % len(buf))
+                    self.put(("info", f"short frame {len(buf)} B"))
         except Exception:
             import traceback
             tb = traceback.format_exc()
@@ -182,6 +193,8 @@ class Viewer(wx.Frame):
         self.frame_raw = None
         self.lut_i = 0
         self.paused = False
+        self.W, self.H = auto_geometry(None) if False else (360, 247)
+        self.geom_done = False
 
         panel = wx.Panel(self)
         top = wx.BoxSizer(wx.HORIZONTAL)
@@ -272,8 +285,7 @@ class Viewer(wx.Frame):
 
     def _save_png(self, fmt):
         arr = np.frombuffer(self.frame_raw, dtype="<u2")
-        samples = arr[3:]
-        img_arr = samples[:W * H].reshape(H, W)
+        img_arr = arr[2:2 + self.W * self.H].reshape(self.H, self.W)
         vmin, vrange = img_arr.min(), max(1, img_arr.max() - img_arr.min())
         t = (img_arr.astype(np.float32) - vmin) / vrange
         rgb = COLORMAPS[self.lut_i][1](t)
@@ -297,14 +309,21 @@ class Viewer(wx.Frame):
     def _bmp(self):
         if self.frame_raw is None:
             return None
+        if not self.geom_done:
+            self.W, self.H = auto_geometry(self.frame_raw)
+            self.geom_done = True
+            self.q.put(("log", "geometry look %s x %s" % (self.W, self.H)))
         arr = np.frombuffer(self.frame_raw, dtype="<u2")
-        samples = arr[3:]
-        img_arr = samples[:W * H].reshape(H, W)
-        vmin, vrange = img_arr.min(), max(1, img_arr.max() - img_arr.min())
-        t = (img_arr.astype(np.float32) - vmin) / vrange
+        img_arr = arr[2:2 + self.W * self.H].reshape(self.H, self.W)
+        vmin = float(np.percentile(img_arr, 2))
+        vmax = float(np.percentile(img_arr, 98))
+        vrange = max(1.0, vmax - vmin)
+        t = np.clip((img_arr.astype(np.float32) - vmin) / vrange, 0, 1)
         rgb = COLORMAPS[self.lut_i][1](t).astype(np.uint8)
-        img = wx.Image(W, H, rgb.tobytes())
-        return wx.Bitmap(img.Scale(VW, VH, wx.IMAGE_QUALITY_NEAREST))
+        img = wx.Image(self.W, self.H, rgb.tobytes())
+        vw = min(2 * self.W, 820)
+        vh = int(vw * self.H / self.W)
+        return wx.Bitmap(img.Scale(vw, vh, wx.IMAGE_QUALITY_NEAREST))
 
     def _draw_bitmap(self, dc):
         bmp = self._bmp()
