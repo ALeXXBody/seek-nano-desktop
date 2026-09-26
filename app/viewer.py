@@ -65,12 +65,28 @@ class Stream(threading.Thread):
         self.put = put
         self.stop_flag = threading.Event()
         self.daemon = True
+        self.log = open("seeknano_verbose.log", "a", buffering=1)
+
+    def trace(self, line):
+        self.log.write(f"{time.time():.3f} {line}\n")
 
     def ctrl_out(self, request, payload):
-        self.dev.ctrl_transfer(REQ_OUT, request, 0, 0, payload, 1250)
+        self.trace(f"W req=0x{request:02x} data={payload.hex()} ret=?")
+        try:
+            self.dev.ctrl_transfer(REQ_OUT, request, 0, 0, payload, 1250)
+            self.trace(f"W req=0x{request:02x} OK")
+        except Exception as e:
+            self.trace(f"W req=0x{request:02x} FAIL {type(e).__name__} {e}")
+            raise
 
     def ctrl_in(self, request, length):
-        return bytes(self.dev.ctrl_transfer(REQ_IN, request, 0, 0, length, 1250))
+        try:
+            r = bytes(self.dev.ctrl_transfer(REQ_IN, request, 0, 0, length, 1250))
+            self.trace(f"R req=0x{request:02x} len={length} -> {r.hex()}")
+            return r
+        except Exception as e:
+            self.trace(f"R req=0x{request:02x} FAIL {type(e).__name__} {e}")
+            raise
 
     def set_page(self, mode, addr):
         self.ctrl_out(0x56, bytes([mode, 0]) + addr.to_bytes(2, "little") + b"\x00\x00")
@@ -86,6 +102,9 @@ class Stream(threading.Thread):
             usb.util.claim_interface(dev, 0)
             self.dev = dev
 
+            self.trace(f"cfg={dev.get_active_configuration()} ifaces={[str(i) for i in dev]}")
+            for i in dev:
+                self.trace(f"iface {i} eps={[ (hex(e.address), e.type, e.maxPacketSize) for e in i ]}")
             # replicate handshake from Seek's own Android app (Phase 1 + Phase 2)
             self.ctrl_out(0x54, b"\x00\x00")
             self.ctrl_out(0x3c, b"\x00\x00")
@@ -113,8 +132,11 @@ class Stream(threading.Thread):
                 try:
                     buf = bytearray()
                     while len(buf) < FRAME_BYTES and not self.stop_flag.is_set():
-                        buf.extend(dev.read(BULK_EP, CHUNK, 1250))
+                        data = dev.read(BULK_EP, CHUNK, 1250)
+                        buf.extend(data)
+                    self.trace(f"BULK got {len(data)} bytes")
                 except usb.core.USBError as ue:
+                    self.trace(f"BULK FAIL {type(ue).__name__} {ue}")
                     self.put(("info", f"no frame yet (kicked). [{type(ue).__name__}]"))
                     continue
                 if len(buf) == FRAME_BYTES:
