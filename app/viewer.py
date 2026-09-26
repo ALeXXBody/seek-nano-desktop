@@ -102,10 +102,14 @@ class Stream(threading.Thread):
             dev.set_configuration()
             usb.util.claim_interface(dev, 0)
             self.dev = dev
-            for i in dev:
-                self.trace("iface %s eps=%s" % (
-                    i,
-                    [(hex(e.bEndpointAddress), e.type, e.maxPacketSize) for e in i]))
+            try:
+                for i in dev:
+                    for ep in i:
+                        self.trace("iface=%d alt=%d ep=%#x type=%d max=%d" % (
+                            i.bInterfaceNumber, i.bAlternateSetting,
+                            ep.bEndpointAddress, ep.type, ep.wMaxPacketSize))
+            except Exception as e:
+                self.trace("iface walk skipped (%s)" % type(e).__name__)
             self.status_cb("device opened")
 
             # Phase 1 - handshake (exact replay of phone session)
