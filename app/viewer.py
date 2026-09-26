@@ -143,7 +143,7 @@ class Viewer:
             self.stream = None
             self.msg = "stopped"
             return
-        self.msg = "starting ..."
+        self.msg = "starting ... (press s again to stop)"
         self.stream = Stream(self.put)
         self.stream.start()
 
@@ -157,12 +157,15 @@ class Viewer:
             elif kind == "error":
                 self.msg = f"ERROR: {payload}"
                 self.stream = None
-        if self.frame is None or self.paused:
-            pass
-        else:
-            self.draw()
+        self.draw()
 
     def draw(self):
+        if self.frame is None:
+            base = np.zeros((H*2, W*2, 3), dtype=np.uint8)
+            cv2.putText(base, self.msg, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (30, 230, 255), 1, cv2.LINE_AA)
+            cv2.putText(base, "s=start c=colormap p=snapshot q=quit", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 255, 200), 1, cv2.LINE_AA)
+            cv2.imshow("Seek Nano Viewer", base)
+            return
         arr = np.frombuffer(self.frame, dtype="<u2")
         samples = arr[3:]
         need = W * H
@@ -198,8 +201,10 @@ class Viewer:
                 self.toggle_stream()
             elif key == ord('c'):
                 self.lut_i = (self.lut_i + 1) % len(self.COLORMAPS)
-            elif key == ord('p'):
-                self.save_png()
+            elif key == ord('d'):
+                if self.frame:
+                    open(f"frame_{int(time.time())}.raw", 'wb').write(self.frame)
+                    self.msg = "saved raw frame"
             elif key == ord(' '):
                 self.paused = not self.paused
         if self.stream:
