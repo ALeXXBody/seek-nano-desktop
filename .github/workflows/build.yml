@@ -21,7 +21,7 @@ jobs:
       - name: install deps
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pyusb opencv-python numpy pyinstaller libusb-package
+          python -m pip install pyusb numpy pyinstaller libusb-package wxPython
 
       - name: build exe
         run: |
