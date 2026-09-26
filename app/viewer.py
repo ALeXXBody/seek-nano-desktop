@@ -1,18 +1,22 @@
-"""Seek Nano thermal viewer (Windows) - repo ALeXXBody/seek-nano-desktop.
+"""Seek Nano thermal viewer (Windows) - proper GUI.
 
-Controls in the window:
-    s  = start stream / toggle pause
-    c  = next colormap
-    p  = PNG snapshot -> next to the exe
-    q  = quit
+Layout:
+  top     : buttons  (Start/Stop, Colormap, Save PNG, Dump raw frame, Copy log, Clear log)
+  left    : video panel (2x zoom, status text bottom)
+  right   : read-only, selectable log (Ctrl+C works) ; also duplicated in seeknano_verbose.log
 """
 import os
+import queue
 import sys
 import threading
 import time
 
-import cv2
 import numpy as np
+import wx
+
+app_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+os.chdir(app_dir)
+
 import usb.core
 import usb.util
 
@@ -22,9 +26,6 @@ try:
 except Exception:
     _BACKEND = None
 
-app_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-os.chdir(app_dir)
-
 VID = 0x289D
 PID = 0x11
 REQ_OUT = 0x40
@@ -33,21 +34,18 @@ BULK_EP = 0x81
 FRAME_BYTES = 177_840
 CHUNK = 6_840
 W, H = 320, 240
+VW, VH = W * 2, H * 2
 
-LUTS = None  # filled below
 
 def ironbow(t):
-    # t in [0,1] -> (b,g,r) uint8
-    t64 = np.clip(t, 0, 1)
-    r = np.clip(132.0 * (np.exp(-0.4 * t64) - 0.3) * 8.5 / 255.0 * 255.0, 0, 255)
-    g = np.clip(140.0 * (np.exp(-0.53 * t64 + 0.16) - 0.25) * 1.45, 0, 255)
-    b = np.clip(80.0 * (np.exp(-0.6 * t64 + 0.24) - 0.2) * 1.3, 0, 255)
-    y = (t64 * 210).astype(np.uint8)
-    r = np.round(255.0 * np.minimum(1.0, np.maximum(0.0, 1.4 * t64 - 0.2)))
-    g = np.round(255.0 * np.clip(0.95 * np.tanh(2.4 * (t64 - 0.53)) + 0.62, 0, 1))
-    b = np.clip(np.round(255.0 * (0.61 + 0.35 * np.sin(5.9 * t64 - 1.2))), 0, 255)
-    b = np.where(t64 > 0.72, 0.35 * 255.0, b)
-    return np.stack([b.astype(np.uint8), g.astype(np.uint8), r.astype(np.uint8)], axis=-1)
+    r = np.clip(255.0 * (1.4 * t - 0.2), 0, 255)
+    g = np.clip(255.0 * (0.62 + 2.4 * (t - 0.53)), 0, 255)
+    g = np.where(t > 0.72, 255 * np.clip(1.35 - 0.9 * (t - 0.72) / 0.28, 0.35, 1.0), g)
+    b = np.clip(255.0 * (0.61 + 0.35 * np.sin(5.9 * t - 1.2)), 0, 255)
+    b = np.where(t > 0.72, 0.35 * 255.0, b)
+    return np.stack([np.clip(b, 0, 255), np.clip(g, 0, 255), np.clip(r, 0, 255)],
+                    axis=-1).astype(np.uint8)
+
 
 def hot_lut(t):
     r = np.clip(t * 2.4, 0, 1) * 255
@@ -55,207 +53,276 @@ def hot_lut(t):
     b = np.clip(t - 0.65, 0, 1) * 255
     return np.stack([b, g, r], axis=-1).astype(np.uint8)
 
+
 def gray_lut(t):
     v = (t * 255).astype(np.uint8)
-    return np.stack([v, v, v], axis=-1)
+    return np.stack([v, v, v], axis=-1).astype(np.uint8)
+
+
+COLORMAPS = [("ironbow", ironbow), ("hot", hot_lut), ("grayscale", gray_lut)]
+
 
 class Stream(threading.Thread):
-    def __init__(self, put):
+    def __init__(self, q, status_cb):
         super().__init__(daemon=True)
-        self.put = put
+        self.q = q
+        self.status_cb = status_cb
         self.stop_flag = threading.Event()
-        self.daemon = True
-        self.log = open("seeknano_verbose.log", "a", buffering=1)
+        try:
+            self.logf = open("seeknano_verbose.log", "a", buffering=1)
+        except Exception:
+            self.logf = None
 
     def trace(self, line):
-        self.log.write(f"{time.time():.3f} {line}\n")
-        try:
-            self.put(("log", line))
-        except Exception:
-            pass
+        if self.logf:
+            self.logf.write("%.3f %s\n" % (time.time(), line))
+        self.q.put(("log", line))
 
     def ctrl_out(self, request, payload):
-        self.trace(f"W req=0x{request:02x} data={payload.hex()} ret=?")
-        try:
-            self.dev.ctrl_transfer(REQ_OUT, request, 0, 0, payload, 1250)
-            self.trace(f"W req=0x{request:02x} OK")
-        except Exception as e:
-            self.trace(f"W req=0x{request:02x} FAIL {type(e).__name__} {e}")
-            raise
+        self.trace("W req=0x%02x data=%s" % (request, payload.hex()))
+        self.dev.ctrl_transfer(REQ_OUT, request, 0, 0, payload, 1250)
+        self.trace("W req=0x%02x OK" % request)
 
     def ctrl_in(self, request, length):
-        try:
-            r = bytes(self.dev.ctrl_transfer(REQ_IN, request, 0, 0, length, 1250))
-            self.trace(f"R req=0x{request:02x} len={length} -> {r.hex()}")
-            return r
-        except Exception as e:
-            self.trace(f"R req=0x{request:02x} FAIL {type(e).__name__} {e}")
-            raise
+        r = bytes(self.dev.ctrl_transfer(REQ_IN, request, 0, 0, length, 1250))
+        self.trace("R req=0x%02x len=%d -> %s" % (request, length, r.hex()))
+        return r
 
-    def set_page(self, mode, addr):
-        self.ctrl_out(0x56, bytes([mode, 0]) + addr.to_bytes(2, "little") + b"\x00\x00")
+    def status(self, text):
+        self.q.put(("status", text))
 
     def run(self):
         try:
             dev = usb.core.find(idVendor=VID, idProduct=PID, backend=_BACKEND)
             if dev is None:
-                raise RuntimeError("FAILED TO FIND DEVICE: Seek Nano (vid 0x289d pid 0xd) 0x11). "
-                    "If Windows Device Manager shows 'Seek Thermal' with an exclamation mark,\n"
-                    "install the libusb-win32 driver ONCE using Zadig (README included).")
+                raise RuntimeError(
+                    "Seek Nano (vid 0x289d pid 0x11) not found.\n"
+                    "If Windows Device Manager shows 'Seek Thermal' with an exclamation\n"
+                    "mark, install the libusbK driver once with Zadig (see README).")
             dev.set_configuration()
             usb.util.claim_interface(dev, 0)
             self.dev = dev
-
-            self.trace(f"cfg={dev.get_active_configuration()} ifaces={[str(i) for i in dev]}")
             for i in dev:
-                self.trace(f"iface {i} eps={[ (hex(e.address), e.type, e.maxPacketSize) for e in i ]}")
-            # replicate handshake from Seek's own Android app (Phase 1 + Phase 2)
+                self.trace("iface %s eps=%s" % (
+                    i,
+                    [(hex(e.bEndpointAddress), e.type, e.maxPacketSize) for e in i]))
+            self.status_cb("device opened")
+
+            # Phase 1 - handshake (exact replay of phone session)
             self.ctrl_out(0x54, b"\x00\x00")
             self.ctrl_out(0x3c, b"\x00\x00")
             self.ctrl_in(0x3d, 2)
             self.ctrl_out(0x3e, b"\x08\x00")
-            self.put(("info", "connected - Start streaming (press s)"))
-            # streaming Phase 4
+            self.status("connected - protocol handshake ok")
+
+            # Phase 4 - enable streaming
             self.ctrl_out(0x37, b"\xfc\x00\x04\x00")
             self.ctrl_out(0x3c, b"\x01\x00")
             self.ctrl_in(0x3d, 2)
+            self.status("streaming mode enabled - pumping frames")
 
             kicks = 0
-            WARMUP = 70          # capture showed ~60 kicks before first frame
             while not self.stop_flag.is_set():
-                for _ in range(3):
-                    self.ctrl_out(0x53, b"\x58\x5b\x01\x00")
-                    rc = self.ctrl_in(0x35, 4)
-                    kicks += 1
-                    if rc != b"\x00\x00\x00\x00":
-                        self.put(("info", f"kick {kicks} -> status {rc.hex()}"))
-                        break
+                self.ctrl_out(0x53, b"\x58\x5b\x01\x00")
+                rc = self.ctrl_in(0x35, 4)
+                kicks += 1
+                if rc != b"\x00\x00\x00\x00":
+                    self.trace("kick %d status %s" % (kicks, rc.hex()))
+                if kicks < 70:
                     time.sleep(0.002)
-                if kicks < WARMUP:
                     continue
                 try:
                     buf = bytearray()
                     while len(buf) < FRAME_BYTES and not self.stop_flag.is_set():
-                        data = dev.read(BULK_EP, CHUNK, 1250)
-                        buf.extend(data)
-                    self.trace(f"BULK got {len(data)} bytes")
+                        buf.extend(dev.read(BULK_EP, CHUNK, 1250))
                 except usb.core.USBError as ue:
-                    self.trace(f"BULK FAIL {type(ue).__name__} {ue}")
-                    self.put(("info", f"no frame yet (kicked). [{type(ue).__name__}]"))
+                    self.trace("BULK FAIL %s: %s" % (type(ue).__name__, ue))
                     continue
                 if len(buf) == FRAME_BYTES:
-                    self.put(("frame", bytes(buf)))
-                    self.put(("info", f"frame ok ({len(buf)} B)"))
+                    self.q.put(("frame", bytes(buf)))
                 else:
-                    self.put(("info", f"short frame {len(buf)} B"))
+                    self.trace("short frame %d B" % len(buf))
         except Exception as e:
-            self.put(("error", f"{type(e).__name__}: {e}"))
+            self.trace("THREAD ERR %s: %s" % (type(e).__name__, e))
+            self.q.put(("error", "%s: %s" % (type(e).__name__, e)))
         finally:
             try:
                 usb.util.dispose_resources(self.dev)
             except Exception:
                 pass
 
-class Viewer:
-    COLORMAPS = [
-        ("ironbow", ironbow),
-        ("hot", hot_lut),
-        ("grayscale", gray_lut),
-    ]
+
+class Viewer(wx.Frame):
     def __init__(self):
-        self.q = []
+        wx.Frame.__init__(self, None, title="Seek Nano Viewer", size=(1000, 660))
+        self.q = queue.Queue()
+        self.stream_thread = None
+        self.frame_raw = None
         self.lut_i = 0
-        self.stream = None
         self.paused = False
-        self.frame = None
-        self.msg = "connect Seek Nano, then press s"
-        cv2.namedWindow("Seek Nano Viewer", cv2.WINDOW_NORMAL)
-        cv2.resizeWindow("Seek Nano Viewer", 400, 380)
-        cv2.namedWindow("Seek Nano log", cv2.WINDOW_NORMAL)
-        cv2.resizeWindow("Seek Nano log", 900, 500)
-        self.log_tail = []
-        self.hist = []
 
-    def put(self, msg):
-        self.q.append(msg)
+        panel = wx.Panel(self)
+        top = wx.BoxSizer(wx.HORIZONTAL)
 
-    def toggle_stream(self):
-        if self.stream and self.stream.is_alive():
-            self.stream.stop_flag.set()
-            self.stream = None
-            self.msg = "stopped"
+        self.start_btn = wx.Button(panel, label="Start stream")
+        self.start_btn.Bind(wx.EVT_BUTTON, self.on_toggle)
+        self.cmap_btn = wx.Button(panel, label="colormap: ironbow")
+        self.cmap_btn.Bind(wx.EVT_BUTTON, self.on_cmap)
+        snap_btn = wx.Button(panel, label="Save PNG")
+        snap_btn.Bind(wx.EVT_BUTTON, self.on_snapshot)
+        raw_btn = wx.Button(panel, label="Dump raw frame")
+        raw_btn.Bind(wx.EVT_BUTTON, self.on_raw)
+        copy_btn = wx.Button(panel, label="Copy log")
+        copy_btn.Bind(wx.EVT_BUTTON, self.on_copy)
+        clear_btn = wx.Button(panel, label="Clear log")
+        clear_btn.Bind(wx.EVT_BUTTON, self.on_clear)
+        for b in (self.start_btn, self.cmap_btn, snap_btn, raw_btn, copy_btn, clear_btn):
+            top.Add(b, 0, wx.ALL, 3)
+
+        split = wx.SplitterWindow(panel, style=wx.SP_LIVE_UPDATE)
+        self.video = wx.Panel(split, style=wx.BORDER_SUNKEN)
+        self.video.SetBackgroundColour(wx.BLACK)
+        self.video.Bind(wx.EVT_PAINT, self.on_paint)
+        self.log = wx.TextCtrl(split, style=wx.TE_MULTILINE | wx.TE_READONLY |
+                               wx.TE_DONTWRAP | wx.TE_DONTEPLETE)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(top, 0, wx.EXPAND)
+        sizer.Add(split, 1, wx.EXPAND)
+        panel.SetSizer(sizer)
+        split.SplitVertically(self.video, self.log, 420)
+        split.SetSashPosition(420)
+
+        self.SetStatusBar(wx.StatusBar(self))
+        self.push_status("plug the Nano in, then press Start stream")
+
+        self.timer = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self.tick, self.timer)
+        self.timer.Start(70)
+        self.Bind(wx.EVT_CLOSE, self.on_close)
+
+    def push_status(self, text):
+        self.GetStatusBar().SetStatusText(text)
+
+    # ---- stream control ----
+    def on_toggle(self, ev):
+        if self.stream_thread and self.stream_thread.is_alive():
+            self.stream_thread.stop_flag.set()
+            self.stream_thread = None
+            self.start_btn.SetLabel("Start stream")
+            self.push_status("stopped")
             return
-        self.msg = "starting ... (press s again to stop)"
-        self.stream = Stream(self.put)
-        self.stream.start()
+        self.frame_raw = None
+        self.push_status("starting ...")
+        self.stream_thread = Stream(self.q, self)
+        self.stream_thread.start()
+        self.start_btn.SetLabel("Stop stream")
 
-    def show(self):
-        while self.q:
-            kind, payload = self.q.pop(0)
-            if kind == "frame":
-                self.frame = payload
-            elif kind in ("info", "error", "log"):
-                self.msg = payload
-                self.hist.append(f"{time.time()%100:8.2f} {payload}")
-                self.hist = self.hist[-14:]
-        self.draw()
+    def on_cmap(self, ev):
+        self.lut_i = (self.lut_i + 1) % len(COLORMAPS)
+        self.cmap_btn.SetLabel("colormap: " + COLORMAPS[self.lut_i][0])
+        self.video.Refresh()
 
-    def draw(self):
-        # log pane window (copy by reading seeknano_verbose.log; kept on-screen too)
-        logbuf = np.zeros((500, 900, 3), dtype=np.uint8)
-        for i, line in enumerate(self.hist[-14:]):
-            cv2.putText(logbuf, line[:110], (10, 30 + i*28), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 210, 100), 1, cv2.LINE_AA)
-        cv2.imshow("Seek Nano log", logbuf)
-        if self.frame is None:
-            base = np.zeros((H*2, W*2, 3), dtype=np.uint8)
-            cv2.putText(base, self.msg, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (30, 230, 255), 1, cv2.LINE_AA)
-            cv2.putText(base, "s=start c=colormap p=snapshot q=quit", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 255, 200), 1, cv2.LINE_AA)
-            cv2.imshow("Seek Nano Viewer", base)
-            return
-        arr = np.frombuffer(self.frame, dtype="<u2")
+    def on_snapshot(self, ev):
+        if self.frame_raw:
+            self._save_png("capture_%d.png")
+        else:
+            self.push_status("no frame yet")
+
+    def on_raw(self, ev):
+        if self.frame_raw:
+            name = "frame_%d.raw" % int(time.time())
+            open(name, "wb").write(self.frame_raw)
+            self.q.put(("log", "saved " + name))
+        else:
+            self.push_status("no frame yet")
+
+    def on_copy(self, ev):
+        val = self.log.GetValue()
+        if wx.TheClipboard.Open():
+            wx.TheClipboard.SetData(wx.TextDataObject(val))
+            wx.TheClipboard.Close()
+            self.q.put(("log", "-> copied to clipboard"))
+        else:
+            self.q.put(("log", "-> clipboard unavaiable"))
+
+    def on_clear(self, ev):
+        self.log.Clear()
+
+    def _save_png(self, fmt):
+        arr = np.frombuffer(self.frame_raw, dtype="<u2")
         samples = arr[3:]
-        need = W * H
-        img_arr = samples[:need].reshape(H, W)
-        t = (img_arr.astype(np.float32) - img_arr.min()) / max(1, img_arr.max() - img_arr.min())
-        rgb = self.COLORMAPS[self.lut_i][1](t)
-        big = cv2.resize(rgb, (W * 2, H * 2), interpolation=cv2.INTER_NEAREST)
-        img = big.copy()
-        cv2.putText(img, self.msg, (8, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (30, 230, 255), 1)
-        cv2.putText(img, f"{self.COLORMAPS[self.lut_i][0]}  (c)", (8, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (200, 255, 200), 1)
-        cv2.imshow("Seek Nano Viewer", img)
+        img_arr = samples[:W * H].reshape(H, W)
+        vmin, vrange = img_arr.min(), max(1, img_arr.max() - img_arr.min())
+        t = (img_arr.astype(np.float32) - vmin) / vrange
+        rgb = COLORMAPS[self.lut_i][1](t)
+        if hasattr(rgb, "astype"):
+            rgb = rgb.astype(np.uint8)
+        try:
+            from PIL import Image
+            Image.fromarray(rgb).save(fmt % int(time.time()))
+            self.q.put(("log", "saved " + fmt % int(time.time())))
+        except ImportError:
+            self.q.put(("log", "PIL missing, raw not saved"))
 
-    def save_png(self):
-        if self.frame is None:
-            self.msg = "no frame yet"
-            return
-        arr = np.frombuffer(self.frame, dtype="<u2")
+    # ---- painting ----
+    def on_paint(self, ev):
+        dc = wx.PaintDC(self.video)
+        dc.SetBackground(wx.BLACK_BRUSH)
+        dc.Clear()
+        self._draw_bitmap(dc)
+        return
+
+    def _bmp(self):
+        if self.frame_raw is None:
+            return None
+        arr = np.frombuffer(self.frame_raw, dtype="<u2")
         samples = arr[3:]
-        img_arr = samples[:W*H].reshape(H, W)
-        t = (img_arr - img_arr.min()) / max(1, img_arr.max() - img_arr.min())
-        rgb = self.COLORMAPS[self.lut_i][1](t)
-        name = f"capture_{int(time.time())}.png"
-        cv2.imwrite(name, cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
-        self.msg = f"saved {name}"
+        img_arr = samples[:W * H].reshape(H, W)
+        vmin, vrange = img_arr.min(), max(1, img_arr.max() - img_arr.min())
+        t = (img_arr.astype(np.float32) - vmin) / vrange
+        rgb = COLORMAPS[self.lut_i][1](t).astype(np.uint8)
+        img = wx.Image(W, H, rgb.tobytes())
+        return wx.Bitmap(img.Scale(VW, VH, wx.IMAGE_QUALITY_NEAREST))
 
-    def run(self):
+    def _draw_bitmap(self, dc):
+        bmp = self._bmp()
+        if bmp is None:
+            dc.SetPen(wx.Pen((30, 230, 255)) if hasattr(dc, "SetPen") else None)
+            return
+        dc.DrawBitmap(bmp, 0, 0)
+
+    # ---- tick ----
+    def tick(self, ev):
         while True:
-            self.show()
-            key = cv2.waitKey(30) & 0xFF
-            if key == ord('q') or key == 27:
+            try:
+                kind, payload = self.q.get_nowait()
+            except queue.Empty:
                 break
-            elif key == ord('s'):
-                self.toggle_stream()
-            elif key == ord('c'):
-                self.lut_i = (self.lut_i + 1) % len(self.COLORMAPS)
-            elif key == ord('d'):
-                if self.frame:
-                    open(f"frame_{int(time.time())}.raw", 'wb').write(self.frame)
-                    self.msg = "saved raw frame"
-            elif key == ord(' '):
-                self.paused = not self.paused
-        if self.stream:
-            self.stream.stop_flag.set()
-        cv2.destroyAllWindows()
+            if kind == "frame":
+                self.frame_raw = payload
+                self.video.Refresh()
+            elif kind == "status":
+                self.push_status(payload)
+            elif kind == "error":
+                self.log.AppendText("ERROR: %s\n" % payload)
+                self.push_status("ERROR: " + payload[:80])
+                self.stream_thread = None
+                self.start_btn.SetLabel("Start stream")
+            elif kind == "log":
+                self.log.AppendText("%s\n" % payload)
+                if self.log.GetLastPosition() > 4000:
+                    self.log.Remove(0, 2000)
+        if self.frame_raw and not self.paused:
+            self.video.Refresh()
+
+    def on_close(self, ev):
+        if self.stream_thread:
+            self.stream_thread.stop_flag.set()
+        ev.Skip()
+
 
 if __name__ == "__main__":
-    Viewer().run()
+    app = wx.App(False)
+    v = Viewer()
+    v.Show(True)
+    app.MainLoop()
