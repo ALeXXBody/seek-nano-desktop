@@ -16,6 +16,12 @@ import numpy as np
 import usb.core
 import usb.util
 
+try:
+    import libusb_package
+    _BACKEND = libusb_package.get_libusb1_backend()
+except Exception:
+    _BACKEND = None
+
 app_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 os.chdir(app_dir)
 
@@ -71,7 +77,7 @@ class Stream(threading.Thread):
 
     def run(self):
         try:
-            dev = usb.core.find(idVendor=VID, idProduct=PID)
+            dev = usb.core.find(idVendor=VID, idProduct=PID, backend=_BACKEND)
             if dev is None:
                 raise RuntimeError("FAILED TO FIND DEVICE: Seek Nano (vid 0x289d pid 0xd) 0x11). "
                     "If Windows Device Manager shows 'Seek Thermal' with an exclamation mark,\n"
