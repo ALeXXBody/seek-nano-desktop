@@ -88,7 +88,7 @@ class Stream(threading.Thread):
         self.trace("R req=0x%02x len=%d -> %s" % (request, length, r.hex()))
         return r
 
-    def status(self, text):
+    def status_unused(self, text):
         self.q.put(("status", text))
 
     def run(self):
@@ -105,25 +105,25 @@ class Stream(threading.Thread):
             try:
                 for i in dev:
                     for ep in i:
-                        self.trace("iface=%d alt=%d ep=%#x type=%d max=%d" % (
+                        self.trace("iface=%d alt=%d ep=%#x attrs=0x%02x max=%d" % (
                             i.bInterfaceNumber, i.bAlternateSetting,
-                            ep.bEndpointAddress, ep.type, ep.wMaxPacketSize))
+                            ep.bEndpointAddress, ep.bmAttributes, ep.wMaxPacketSize))
             except Exception as e:
                 self.trace("iface walk skipped (%s)" % type(e).__name__)
-            self.status_cb("device opened")
+            self.q.put(("status", "device opened"))
 
             # Phase 1 - handshake (exact replay of phone session)
             self.ctrl_out(0x54, b"\x00\x00")
             self.ctrl_out(0x3c, b"\x00\x00")
             self.ctrl_in(0x3d, 2)
             self.ctrl_out(0x3e, b"\x08\x00")
-            self.status("connected - protocol handshake ok")
+            self.q.put(("status", "connected - protocol handshake ok"))
 
             # Phase 4 - enable streaming
             self.ctrl_out(0x37, b"\xfc\x00\x04\x00")
             self.ctrl_out(0x3c, b"\x01\x00")
             self.ctrl_in(0x3d, 2)
-            self.status("streaming mode enabled - pumping frames")
+            self.q.put(("status", "streaming mode enabled - pumping frames"))
 
             kicks = 0
             while not self.stop_flag.is_set():
@@ -146,9 +146,11 @@ class Stream(threading.Thread):
                     self.q.put(("frame", bytes(buf)))
                 else:
                     self.trace("short frame %d B" % len(buf))
-        except Exception as e:
-            self.trace("THREAD ERR %s: %s" % (type(e).__name__, e))
-            self.q.put(("error", "%s: %s" % (type(e).__name__, e)))
+        except Exception:
+            import traceback
+            tb = traceback.format_exc()
+            self.trace(tb)
+            self.q.put(("error", tb.splitlines()[-1] if tb else "unknown"))
         finally:
             try:
                 usb.util.dispose_resources(self.dev)
