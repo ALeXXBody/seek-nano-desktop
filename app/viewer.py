@@ -137,12 +137,26 @@ class Stream(threading.Thread):
                 if kicks < 70:
                     time.sleep(0.002)
                     continue
+                if not eps:
+                    self.put(("error", "no bulk-in endpoint found on device"))
+                    return
+                iface_n, ep_addr = eps[self.ep_i % len(eps)]
+                self.ep_i += 1
                 try:
                     buf = bytearray()
+                    got_any = False
                     while len(buf) < FRAME_BYTES and not self.stop_flag.is_set():
-                        buf.extend(dev.read(BULK_EP, CHUNK, 1250))
+                        try:
+                            buf.extend(dev.read(ep_addr, CHUNK, 300))
+                            got_any = True
+                        except usb.core.USBError as timeout_err:
+                            if not got_any:
+                                raise
+                            # mid-frame timeout: switch to next chunk ok
+                            continue
                 except usb.core.USBError as ue:
-                    self.trace("BULK FAIL %s: %s" % (type(ue).__name__, ue))
+                    self.trace("BULK FAIL (iface=%d ep=%#x) %s: %s" % (iface_n, ep_addr, type(ue).__name__, ue))
+                    self.put(("log", "iface %d ep %s -> FAIL (%s)" % (iface_n, hex(ep_addr), type(ue).__name__)))
                     continue
                 if len(buf) == FRAME_BYTES:
                     self.q.put(("frame", bytes(buf)))
