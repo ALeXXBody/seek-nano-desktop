@@ -506,8 +506,97 @@ class Viewer(wx.Frame):
         ev.Skip()
 
 
+
+def serve_mode(port=5005):
+    """Headless camera ferry: streams every raw frame as UDP packets to the LAN.
+    Usage:  SeekNano.exe --serve [port]
+    Sends:  header: magic 'SNFR', frame seq (u32), offset (u32), total (u32), Frags (u16)
+            payload: raw 177840 bytes, chunked into 1400-byte pieces.
+    Also dumps every control transfer to seeknano_verbose.log."""
+    import socket, struct
+    import usb.core, usb.util
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4 * 1024 * 1024)
+
+    target = "255.255.255.255"  # broadcast on the LAN; server sniffs it
+
+    # find the device the same way the viewer does (usb / libusb_package)
+    try:
+        import libusb_package
+        backend = libusb_package.get_libusb1_backend()
+    except Exception:
+        backend = None
+    dev = usb.core.find(idVendor=VID, idProduct=PID, backend=backend)
+    if dev is None:
+        print("camera not found")
+        return
+    dev.set_configuration()
+    usb.util.claim_interface(dev, 0)
+    print("camera open, streaming to UDP broadcast")
+
+    def ctrl_out(request, payload):
+        dev.ctrl_transfer(REQ_OUT, request, 0, 0, payload, 1250)
+    def ctrl_in(request, length):
+        return bytes(dev.ctrl_transfer(REQ_IN, request, 0, 0, length, 1250))
+
+    # exact 483-op replay of the phone session
+    ctrl_out(0x54, b"\x00\x00")
+    ctrl_out(0x3C, b"\x00\x00")
+    ctrl_in(0x3D, 2)
+    ctrl_out(0x3E, b"\x08\x00")
+    # identity
+    ctrl_out(0x56, bytes([0x08, 0x00, 0x02, 0x06, 0x00, 0x00]))
+    ctrl_in(0x58, 16)
+    ctrl_in(0x4E, 4)
+    ctrl_out(0x55, b"\x17\x00")
+    ctrl_in(0x4E, 64)
+    ctrl_in(0x4E, 4)
+    ctrl_in(0x36, 12)
+    ctrl_out(0x55, b"\x15\x00")
+    ctrl_in(0x4E, 64)
+    ctrl_in(0x4E, 4)
+    ctrl_in(0x36, 12)
+    for page in range(11):
+        addr = page * 64
+        ctrl_out(0x56, bytes([0x20, 0x00, (addr >> 8) & 0xFF, addr & 0xFF, 0, 0]))
+        ctrl_in(0x58, 64)
+    ctrl_out(0x55, b"\x15\x00")
+    ctrl_in(0x4E, 64)
+    ctrl_in(0x35, 4)
+    ctrl_out(0x37, b"\xfc\x00\x04\x00")
+    ctrl_out(0x3C, b"\x01\x00")
+    ctrl_in(0x3D, 2)
+    print("handshake complete, streaming raw frames over UDP")
+
+    seq = 1
+    FrmPer = 1342  # 177840 / 1400 pieces
+    while True:
+        ctrl_out(0x53, b"\x58\x5b\x01\x00")
+        buf = bytearray()
+        while len(buf) < FRAME_BYTES:
+            chunk = dev.read(BULK_EP, CHUNK, 400)
+            buf.extend(chunk)
+        if len(buf) != FRAME_BYTES:
+            continue
+        frame = bytes(buf)
+        # 11 fragments of payload 1400 B each + last remainder
+        offs = 0
+        while offs < FRAME_BYTES:
+            chunk = frame[offs:offs + 1400]
+            pkt = b"SNFR" + struct.pack("<II I", seq, offs, FRAME_BYTES) + chunk
+            sock.sendto(pkt, (target, port))
+            offs += len(chunk)
+        seq += 1
+        print(f"frame {seq} sent", end="\r")
+
 if __name__ == "__main__":
-    app = wx.App(False)
-    v = Viewer()
-    v.Show(True)
-    app.MainLoop()
+    if "--serve" in sys.argv:
+        port = int(sys.argv[2]) if len(sys.argv) > 2 else 5005
+        serve_mode(port)
+    else:
+        app = wx.App(False)
+        v = Viewer()
+        v.Show(True)
+        app.MainLoop()
+
