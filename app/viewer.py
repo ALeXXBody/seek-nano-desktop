@@ -171,12 +171,17 @@ class Stream(threading.Thread):
                 kicks += 1
                 try:
                     buf = bytearray()
+                    n_chunks = 0
                     while len(buf) < FRAME_BYTES and not self.stop_flag.is_set():
-                        buf.extend(dev.read(ep_addr, CHUNK, 500))
+                        chunk = dev.read(ep_addr, CHUNK, 500)
+                        buf.extend(chunk)
+                        n_chunks += 1
+                        self.trace("kick %d chunk %d got %d B (total %d)" % (
+                            kicks, n_chunks, len(chunk), len(buf)))
                 except usb.core.USBError as ue:
+                    self.put(("log", "kick %d: FAIL %s (chunks=%d total=%d)" % (
+                        kicks, type(ue).__name__, n_chunks, len(buf))))
                     self.trace("BULK FAIL %s: %s" % (type(ue).__name__, ue))
-                    if kicks % 20 == 0:
-                        self.put(("log", f"kick {kicks}: {type(ue).__name__}"))
                     continue
                 if len(buf) == FRAME_BYTES:
                     self.put(("frame", bytes(buf)))
