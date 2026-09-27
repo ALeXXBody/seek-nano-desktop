@@ -25,7 +25,7 @@ jobs:
 
       - name: build exe
         run: |
-          pyinstaller --onefile --windowed --name SeekNano `
+          pyinstaller --onefile --windowed --name "SeekNano-$(date +%H%M%S)" `
             --collect-all libusb_package `
             --hidden-import usb.backend.libusb10 `
             app/viewer.py
