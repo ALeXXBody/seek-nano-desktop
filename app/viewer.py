@@ -606,13 +606,26 @@ def serve_mode(port=5005):
         seq += 1
         print(f"frame {seq} sent", end="\r")
 
+def _crashlog(fn, *a):
+    try:
+        fn(*a)
+    except Exception:
+        import traceback, sys as _s
+        with open("crash.txt", "a") as f:
+            traceback.print_exc(file=f)
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(None, "crash.txt written next to the exe", "SeekNano", 0x10)
+
 if __name__ == "__main__":
     if "--serve" in sys.argv:
-        port = int(sys.argv[2]) if len(sys.argv) > 2 else 5005
-        serve_mode(port)
+        port = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 5005
+        _crashlog(serve_mode, port)
     else:
-        app = wx.App(False)
-        v = Viewer()
-        v.Show(True)
-        app.MainLoop()
+        _crashlog(lambda: (wx.App(False), Viewer().Show(True), (_ for _ in ()).throw(SystemExit)) if False else _run_gui())
+
+def _run_gui():
+    app = wx.App(False)
+    v = Viewer()
+    v.Show(True)
+    app.MainLoop()
 
