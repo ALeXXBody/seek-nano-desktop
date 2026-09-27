@@ -13,6 +13,10 @@
 // Build:  cl /nologo /W4 /LD seeknanousb.c /Fe:seeknanousb.dll /link winusb.lib setupapi.lib
 
 #define WIN32_LEAN_AND_MEAN
+#define _CRT_SECURE_NO_WARNINGS
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <windows.h>
 #include <winusb.h>
 #include <usbiodef.h>
@@ -100,10 +104,11 @@ __declspec(dllexport) int SN_open(void)
         SetupDiDestroyDeviceInfoList(devInfo);
         return -3;
     }
-    PSP_DEVICE_INTERFACE_DETAIL_DATA_W det = (PSP_DEVICE_INTERFACE_DETAIL_DATA_W)malloc(need);
+    PSP_DEVICE_INTERFACE_DETAIL_DATA_W det =
+        (PSP_DEVICE_INTERFACE_DETAIL_DATA_W)HeapAlloc(GetProcessHeap(), 0, need);
     det->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W);
     if (!SetupDiGetDeviceInterfaceDetailW(devInfo, &di, det, need, NULL, NULL)) {
-        free(det);
+        HeapFree(GetProcessHeap(), 0, det);
         SetupDiDestroyDeviceInfoList(devInfo);
         return -4;
     }
@@ -112,7 +117,7 @@ __declspec(dllexport) int SN_open(void)
                         FILE_SHARE_READ | FILE_SHARE_WRITE,
                         NULL, OPEN_EXISTING,
                         FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL);
-    free(det);
+    HeapFree(GetProcessHeap(), 0, det);
     SetupDiDestroyDeviceInfoList(devInfo);
     if (g_dev == INVALID_HANDLE_VALUE)
         return -5;
@@ -241,7 +246,7 @@ __declspec(dllexport) int SN_fwver(char* out, int cap)
     if (ctrl_in(0x4E, 64, buf) < 0)
         return -2;
     for (int i = 0; i < 24 && j + 2 < cap; i++)
-        j += sprintf(out + j, "%02x ", buf[i]);
+        j += wsprintfA(out + j, "%02x ", buf[i]);
     out[j] = 0;
     return 0;
 }
