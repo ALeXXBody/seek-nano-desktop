@@ -54,7 +54,10 @@ jobs:
           git clone --depth 1 https://github.com/pbatard/libwdi.git libwdi-src
           for /f "usebackq delims=" %%i in (`vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSPATH=%%i
           call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
-          msbuild libwdi-src\examples\.msvc\wdi-simple.vcxproj /p:Configuration=Release /p:Platform=x64 /m
+          msbuild libwdi-src\libwdi\.msvc\embedder.vcxproj /p:Configuration=Release /p:Platform=Win32 /m
+          msbuild libwdi-src\libwdi\.msvc\libwdi_static.vcxproj /p:Configuration=Release /p:Platform=x64 /m
+          msbuild libwdi-src\examples\getopt\.msvc\getopt.vcxproj /p:Configuration=Release /p:Platform=x64 /m
+          msbuild libwdi-src\examples\.msvc\wdi-simple.vcxproj /p:Configuration=Release /p:Platform=x64 /p:BuildProjectReferences=false /m
           dir /s /b libwdi-src\*wdi-simple.exe
           for /f "delims=" %%f in ('dir /s /b libwdi-src\*wdi-simple.exe') do copy /y "%%f" driver\wdi-simple.exe
           if not exist driver\wdi-simple.exe exit 1
