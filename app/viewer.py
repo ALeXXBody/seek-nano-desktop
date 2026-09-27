@@ -65,49 +65,18 @@ def gray_lut(t):
 
 COLORMAPS = [("ironbow", ironbow), ("hot", hot_lut), ("grayscale", gray_lut)]
 
-CFG_FILE = "seeknano_geom.json"
+RAW_W, RAW_H = 342, 260
+IMG_W, IMG_H = 320, 240
+ROI_X, ROI_Y = 1, 4           # seek-like ROI (see libseek-thermal SeekThermalPro)
+OFFSET_BIAS = 0x4000
 
 
-def auto_geometry(frame_raw):
-    """Find (width, height) maximizing 2D sharpness of the u16 array while
-    EXCLUDING the 6,840-byte bulk chunk seams (they inject fake discontinuity)."""
+def decode_frame(frame_raw):
+    """SeekThermalPro-layout decoder: raw 342x260 -> image 320x240."""
     arr = np.frombuffer(frame_raw, dtype="<u2").astype(np.float32)
-    n = len(arr)
-    seam_samples = 6840 // 2           # 3420 samples per chunk
-    nsamp = len(arr)
-    mask = np.ones(nsamp, dtype=bool)
-    # mask out samples near every seam
-    for c in range(1, nsamp // seam_samples + 2):
-        i0 = c * seam_samples
-        if i0 < nsamp:
-            lo = max(0, i0 - 160)
-            hi = min(nsamp, i0 + 160)
-            mask[lo:hi] = False
-    if mask.sum() < 10000:
-        mask = np.ones(nsamp, dtype=bool)
-    divs = [d for d in range(100, 700) if n % d == 0]
-    best = None
-    for W in divs:
-        H = n // W
-        if H < 80 or H > 700:
-            continue
-        try:
-            img = arr[:H * W].reshape(H, W)
-        except ValueError:
-            continue
-        m = mask[:H * W].reshape(H, W)
-        gH = np.zeros((H, W - 1), dtype=np.float32)
-        gV = np.zeros((H - 1, W), dtype=np.float32)
-        np.abs(np.diff(img, axis=1), out=gH)
-        np.abs(np.diff(img, axis=0), out=gV)
-        sharpH = gH[m[:, :-1]].mean() if m[:, :-1].any() else 0
-        sharpV = gV[m[:-1, :]].mean() if m[:-1, :].any() else 0
-        sharpness = sharpH + 0.5 * sharpV
-        if best is None or sharpness > best[0]:
-            best = (sharpness, W, H)
-    if best:
-        return best[1], best[2]
-    return 360, 247
+    raw = arr[:RAW_W * RAW_H].reshape(RAW_H, RAW_W)
+    fid = int(raw[0, 2])
+    return raw, fid
 
 
 class Stream(threading.Thread):
@@ -229,8 +198,10 @@ class Viewer(wx.Frame):
         self.frame_raw = None
         self.lut_i = 0
         self.paused = False
-        self.W, self.H = auto_geometry(None) if False else (360, 247)
-        self.geom_done = False
+        self.W, self.H = IMG_W, IMG_H
+        self.geom_done = True
+        self.ffc = None            # flat-field reference frame
+        self.last_fid = None
 
         panel = wx.Panel(self)
         top = wx.BoxSizer(wx.HORIZONTAL)
@@ -345,18 +316,20 @@ class Viewer(wx.Frame):
     def _bmp(self):
         if self.frame_raw is None:
             return None
-        if not self.geom_done:
-            self.W, self.H = auto_geometry(self.frame_raw)
-            self.geom_done = True
-            self.q.put(("log", "geometry look %s x %s" % (self.W, self.H)))
-        arr = np.frombuffer(self.frame_raw, dtype="<u2")
-        img_arr = arr[2:2 + self.W * self.H].reshape(self.H, self.W)
+        raw, fid = decode_frame(self.frame_raw)
+        self.last_fid = fid
+        img_arr = raw[ROI_Y:ROI_Y + IMG_H, ROI_X:ROI_X + IMG_W].copy()
+        if fid == 1:
+            self.ffc = img_arr          # shutter-closed calibration frame
+            self.q.put(("log", "FFC frame captured"))
+        if self.ffc is not None:
+            img_arr = img_arr + OFFSET_BIAS - self.ffc   # libseek retrieve()
         vmin = float(np.percentile(img_arr, 2))
         vmax = float(np.percentile(img_arr, 98))
         vrange = max(1.0, vmax - vmin)
         t = np.clip((img_arr.astype(np.float32) - vmin) / vrange, 0, 1)
         rgb = COLORMAPS[self.lut_i][1](t).astype(np.uint8)
-        img = wx.Image(self.W, self.H, rgb.tobytes())
+        img = wx.Image(IMG_W, IMG_H, rgb.tobytes())
         vw = min(2 * self.W, 820)
         vh = int(vw * self.H / self.W)
         return wx.Bitmap(img.Scale(vw, vh, wx.IMAGE_QUALITY_NEAREST))
