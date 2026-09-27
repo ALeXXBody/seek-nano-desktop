@@ -139,29 +139,32 @@ class NativeStream(threading.Thread):
             Stream(self.q).run()
             return
         self.q.put(("status", "native streaming - up to 25 fps"))
+        self.q.put(("log", "handshake ok, reading frames"))
         fails = 0
-        while not self.stop_flag.is_set():
-            t0 = time.time()
-            n = self.dll.SN_get_frame(self.buf)
-            dt = time.time() - t0
-            if n == FRAME_BYTES:
-                fails = 0
-                self.q.put(("frame", bytes(self.buf.raw)))
-                self.q.put(("info", "frame %.0f ms" % (dt * 1000)))
-                if self.stop_flag.is_set():
-                    break
-                d = 0.04 - dt
-                if d > 0:
-                    time.sleep(d)
-            else:
-                fails += 1
-                self.q.put(("log", "native fail %d (%d/%d B)" % (fails, n, FRAME_BYTES)))
-                if fails > 12:
-                    self.q.put(("error", "native pump stalled - stop/start"))
-                    break
-                time.sleep(0.2)
-        self.dll.SN_stream_stop()
-        self.dll.SN_close()
+        get_frame = getattr(d, pfx + "get_frame")
+        try:
+            while not self.stop_flag.is_set():
+                t0 = time.time()
+                n = get_frame(self.buf)
+                dt = time.time() - t0
+                if n == FRAME_BYTES:
+                    fails = 0
+                    self.q.put(("frame", bytes(self.buf.raw)))
+                    self.q.put(("info", "frame %.0f ms" % (dt * 1000)))
+                    wait = 0.04 - dt
+                    if wait > 0 and not self.stop_flag.is_set():
+                        time.sleep(wait)
+                else:
+                    fails += 1
+                    self.q.put(("log", "native fail %d (%s B)" % (fails, n)))
+                    if fails > 12:
+                        self.q.put(("error", "native pump stalled - stop/start"))
+                        break
+                    time.sleep(0.2)
+        except Exception as e:
+            self.q.put(("error", "native read: %s" % e))
+        getattr(d, pfx + "stream_stop")()
+        getattr(d, pfx + "close")()
 
 
 
