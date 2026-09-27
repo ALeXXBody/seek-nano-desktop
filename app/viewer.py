@@ -438,38 +438,31 @@ class Viewer(wx.Frame):
         return
 
     def _bmp(self):
+        cached = getattr(self, "_bmp_cache", None)
+        if cached and cached[0] == self.frame_raw:
+            return cached[1]
         if self.frame_raw is None:
             return None
         raw, fid = decode_frame(self.frame_raw)
         self.last_fid = fid
-        img_arr = raw[ROI_Y:ROI_Y + IMG_H, ROI_X:ROI_X + IMG_W].copy()
-        # The camera already applies its own shutter correction. Subtracting
-        # another FFC on top of that gets worse at every click. Show the image.
-        mean = float(img_arr.mean())
-        if self.disp_prev is not None and abs(mean - float(self.disp_prev.mean())) > 400:
-            self.disp_prev = None
-            self.lo_ema = self.hi_ema = None
+        if fid != 3:
+            self._bmp_cache = (self.frame_raw, None)
+            return None
+        img_arr = raw[ROI_Y:ROI_Y + IMG_H, ROI_X:ROI_X + IMG_W]
+        # median 3x3 for stuck pixels only; no temporal smoothing
         p1 = np.pad(img_arr, 1, mode="edge")
         stack = np.stack([p1[dy:dy+IMG_H, dx:dx+IMG_W] for dy in range(3) for dx in range(3)])
         img_arr = np.median(stack, axis=0)
-        if self.disp_prev is not None:
-            img_arr = 0.35 * self.disp_prev + 0.65 * img_arr
-        self.disp_prev = img_arr.copy()
-        # adaptive contrast: smoothed percentile bounds (no pumping flicker)
-        lo = float(np.percentile(img_arr, 5))
-        hi = float(np.percentile(img_arr, 95))
-        if self.lo_ema is None:
-            self.lo_ema, self.hi_ema = lo, hi
-        else:
-            self.lo_ema = 0.85 * self.lo_ema + 0.15 * lo
-            self.hi_ema = 0.85 * self.hi_ema + 0.15 * hi
-        lo, hi = self.lo_ema, self.hi_ema
-        t = np.clip((img_arr - lo) / max(1.0, hi - lo), 0, 1) ** 0.85
+        lo = float(np.percentile(img_arr, 2))
+        hi = float(np.percentile(img_arr, 98))
+        t = np.clip((img_arr - lo) / max(1.0, hi - lo), 0, 1)
         rgb = COLORMAPS[self.lut_i][1](t).astype(np.uint8)
         img = wx.Image(IMG_W, IMG_H, rgb.tobytes())
         vw = min(2 * self.W, 820)
         vh = int(vw * self.H / self.W)
-        return wx.Bitmap(img.Scale(vw, vh, wx.IMAGE_QUALITY_NEAREST))
+        bmp = wx.Bitmap(img.Scale(vw, vh, wx.IMAGE_QUALITY_NEAREST))
+        self._bmp_cache = (self.frame_raw, bmp)
+        return bmp
 
     def _draw_bitmap(self, dc):
         bmp = self._bmp()

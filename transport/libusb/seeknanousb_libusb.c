@@ -160,21 +160,57 @@ static void nlog(const char* m)
 __declspec(dllexport) int SNLB_stream_start(void)
 {
     if (!g_claimed) return -1;
-    unsigned char z2[2] = { 0, 0 };
+    unsigned char z2[2]  = { 0, 0 };
     unsigned char st[2];
-    int r;
-    nlog("start");
-    r = c_out(0x54, 2, z2);  nlog(r < 0 ? "54 fail" : "54 ok"); if (r < 0) return -10;
-    r = c_out(0x3C, 2, z2);  nlog(r < 0 ? "3c fail" : "3c ok"); if (r < 0) return -11;
-    r = c_in(0x3D, 2, st);   nlog(r < 0 ? "3d fail" : "3d ok"); if (r < 0) return -12;
+    unsigned char cursor[6];
+    unsigned char sel[2];
+    unsigned char page[64];
     unsigned char imgproc[2] = { 0x08, 0x00 };
-    r = c_out(0x3E, 2, imgproc); nlog(r < 0 ? "3e fail" : "3e ok"); if (r < 0) return -13;
-    Sleep(5);
     unsigned char cfg[4]  = { 0xfc, 0x00, 0x04, 0x00 };
     unsigned char on[2]   = { 0x01, 0x00 };
-    r = c_out(0x37, 4, cfg); nlog(r < 0 ? "37 fail" : "37 ok"); if (r < 0) return -14;
-    r = c_out(0x3C, 2, on);  nlog(r < 0 ? "3c1 fail" : "3c1 ok"); if (r < 0) return -15;
-    r = c_in(0x3D, 2, st);   nlog(r < 0 ? "3d1 fail" : "3d1 ok"); if (r < 0) return -16;
+    int pf, r, i;
+
+    nlog("start: phase 1");
+    if (c_out(0x54, 2, z2)  < 0) return -10;
+    if (c_out(0x3C, 2, z2)  < 0) return -11;
+    if (c_in(0x3D, 2, st)   < 0) return -12;
+    if (c_out(0x3E, 2, imgproc) < 0) return -13;
+
+    nlog("start: phase 2 identity");
+    cursor[0] = 0x08; cursor[1] = 0x00; cursor[2] = 0x02; cursor[3] = 0x06; cursor[4] = 0x00; cursor[5] = 0x00;
+    if (c_out(0x56, 6, cursor) < 0) return -20;
+    c_in(0x58, 16, page);                    /* chip id */
+    c_in(0x4E, 4,  page);
+    sel[0] = 0x17; sel[1] = 0x00;
+    if (c_out(0x55, 2, sel) < 0) return -21;
+    c_in(0x4E, 64, page);                    /* serial + part number */
+    c_in(0x4E, 4,  page);
+    c_in(0x36, 12, page);                    /* fw info */
+    sel[0] = 0x15; sel[1] = 0x00;
+    if (c_out(0x55, 2, sel) < 0) return -22;
+    c_in(0x4E, 64, page);
+    c_in(0x4E, 4,  page);
+    c_in(0x36, 12, page);
+
+    nlog("start: phase 3 rom dump 0x00-0x0A00");
+    for (i = 0; i < 11; i++) {
+        cursor[0] = 0x20; cursor[1] = 0x00;
+        cursor[2] = (unsigned char)((i * 64 >> 8) & 0xFF);
+        cursor[3] = (unsigned char)((i * 64) & 0xFF);
+        cursor[4] = 0; cursor[5] = 0;
+        if (c_out(0x56, 6, cursor) < 0) return -30;
+        r = c_in(0x58, 64, page);
+        if (r < 0) return -31;
+    }
+    sel[0] = 0x15; sel[1] = 0x00;
+    if (c_out(0x55, 2, sel) < 0) return -23;
+    c_in(0x4E, 64, page);
+    c_in(0x35, 4, st);
+
+    nlog("start: phase 4");
+    if (c_out(0x37, 4, cfg) < 0) return -14;
+    if (c_out(0x3C, 2, on)  < 0) return -15;
+    if (c_in(0x3D, 2, st)   < 0) return -16;
     p_libusb_clear_halt(g_dev, 0x81);
     g_streaming = 1;
     nlog("streaming");
@@ -183,14 +219,12 @@ __declspec(dllexport) int SNLB_stream_start(void)
 
 static int resync(void)
 {
-    unsigned char z2[2] = { 0, 0 };
-    unsigned char on[2] = { 1, 0 };
-    unsigned char st[2];
+    unsigned char junk[6840];
     p_libusb_clear_halt(g_dev, 0x81);
-    c_out(0x3C, 2, z2);
-    Sleep(20);
-    c_out(0x3C, 2, on);
-    c_in(0x3D, 2, st);
+    for (int i = 0; i < 4; i++) {
+        int n = 0;
+        p_libusb_bulk_transfer(g_dev, 0x81, junk, 6840, &n, 40);
+    }
     return 0;
 }
 
@@ -198,29 +232,24 @@ __declspec(dllexport) int SNLB_get_frame(unsigned char* out)
 {
     if (!g_dev || !g_streaming) return -1;
     unsigned char req[4];
+    int total = 0, kick;
+
     le32(req, 88920);
-    c_out(0x53, 4, req);
-    int total = 0;
+    for (kick = 0; kick < 200; kick++) {
+        c_out(0x53, 4, req);
+        c_in(0x35, 4, req);
+    }
+    /* camera queues the frame around now; read it in device chunks */
     while (total < 177840) {
         int n = 0;
         int r = p_libusb_bulk_transfer(g_dev, 0x81, out + total,
                                        6840, &n, 400);
-        if (r != 0) {
-            resync();
-            return -2;
-        }
+        if (r != 0) return -2;
         if (n == 0) break;
         total += n;
     }
-    if (total != 177840) {
-        resync();
-        return -3;
-    }
-    /* Seek frame marker: bytes 79 05 */
-    if (out[0] != 0x79 || out[1] != 0x05) {
-        resync();
-        return -4;
-    }
+    if (total != 177840) return -3;
+    if (out[0] != 0x79 || out[1] != 0x05) return -4;
     return total;
 }
 
