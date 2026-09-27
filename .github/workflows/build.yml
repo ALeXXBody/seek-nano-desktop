@@ -74,7 +74,6 @@ jobs:
           dist\SeekNano.exe --selftest
           if errorlevel 1 echo warnings in selftest (still deploying)
       - name: upload release
-      - name: upload release
         run: |        
           TAG="${GITHUB_REF_NAME}"
           case "$TAG" in v*) ;; *) TAG="v0.2.0-manual";; esac
