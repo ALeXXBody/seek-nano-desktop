@@ -34,6 +34,13 @@ jobs:
           Export-Certificate -Cert $cert -FilePath driver\SeekNanoSigner.cer
           $thumb = $cert.Thumbprint
           echo "signerthumb=$thumb" >> $env:GITHUB_ENV
+      - name: build libusb transport dll (cl)
+        shell: cmd
+        run: |
+          for /f "usebackq delims=" %%i in (`vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
+          cl /nologo /W4 /LD transport\libusb\seeknanousb_libusb.c /Fe:seeknanodirect.dll /link kernel32.lib user32.lib
+          if not exist seeknanodirect.dll exit 1
       - name: build native transport dll (cl)
         shell: cmd
         run: |
@@ -48,6 +55,7 @@ jobs:
       - name: build exe
         run: |
           pyinstaller --onefile --windowed --name SeekNano `
+            --add-binary "seeknanodirect.dll;." `
             --add-binary "seeknanousb.dll;." `
             --collect-all libusb_package `
             --hidden-import usb.backend.libusb10 `
