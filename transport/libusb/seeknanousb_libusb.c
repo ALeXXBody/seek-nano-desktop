@@ -181,6 +181,19 @@ __declspec(dllexport) int SNLB_stream_start(void)
     return 0;
 }
 
+static int resync(void)
+{
+    unsigned char z2[2] = { 0, 0 };
+    unsigned char on[2] = { 1, 0 };
+    unsigned char st[2];
+    p_libusb_clear_halt(g_dev, 0x81);
+    c_out(0x3C, 2, z2);
+    Sleep(20);
+    c_out(0x3C, 2, on);
+    c_in(0x3D, 2, st);
+    return 0;
+}
+
 __declspec(dllexport) int SNLB_get_frame(unsigned char* out)
 {
     if (!g_dev || !g_streaming) return -1;
@@ -191,12 +204,24 @@ __declspec(dllexport) int SNLB_get_frame(unsigned char* out)
     while (total < 177840) {
         int n = 0;
         int r = p_libusb_bulk_transfer(g_dev, 0x81, out + total,
-                                       177840 - total, &n, 400);
-        if (r != 0) return -2;             /* timeout or pipe error */
+                                       6840, &n, 400);
+        if (r != 0) {
+            resync();
+            return -2;
+        }
         if (n == 0) break;
         total += n;
     }
-    return (total == 177840) ? total : -3;
+    if (total != 177840) {
+        resync();
+        return -3;
+    }
+    /* Seek frame marker: bytes 79 05 */
+    if (out[0] != 0x79 || out[1] != 0x05) {
+        resync();
+        return -4;
+    }
+    return total;
 }
 
 __declspec(dllexport) void SNLB_stream_stop(void)

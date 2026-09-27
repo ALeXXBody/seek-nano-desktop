@@ -156,7 +156,7 @@ class NativeStream(threading.Thread):
                         time.sleep(wait)
                 else:
                     fails += 1
-                    self.q.put(("log", "native fail %d (%s B)" % (fails, n)))
+                    self.q.put(("log", "skip bad frame %d (rc %s)" % (fails, n)))
                     if fails > 12:
                         self.q.put(("error", "native pump stalled - stop/start"))
                         break
