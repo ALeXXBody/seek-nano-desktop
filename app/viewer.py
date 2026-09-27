@@ -535,8 +535,24 @@ def serve_mode(port=5005):
     usb.util.claim_interface(dev, 0)
     print("camera open, streaming to UDP broadcast")
 
-    def ctrl_out(request, payload):
-        dev.ctrl_transfer(REQ_OUT, request, 0, 0, payload, 1250)
+    def ctrl_out(request, payload, retry=True):
+        try:
+            dev.ctrl_transfer(REQ_OUT, request, 0, 0, payload, 1250)
+        except usb.core.USBError as e:
+            # EPIPE (stalled control pipe) or busy device: reset once and retry
+            if retry and (getattr(e, "errno", None) == 32 or "Pipe" in str(e)):
+                print(f"pipe stall on ctrl req 0x{request:02x}: {e}; resetting camera")
+                try:
+                    dev.reset()
+                    time.sleep(1)
+                    dev.set_configuration()
+                    usb.util.claim_interface(dev, 0)
+                    dev.ctrl_transfer(REQ_OUT, request, 0, 0, payload, 1250)
+                    return
+                except Exception as e2:
+                    print(f"reset failed: {e2}. unplug and replug the camera, then rerun.")
+                    sys.exit(3)
+            raise
     def ctrl_in(request, length):
         return bytes(dev.ctrl_transfer(REQ_IN, request, 0, 0, length, 1250))
 
