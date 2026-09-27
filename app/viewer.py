@@ -157,10 +157,11 @@ class Stream(threading.Thread):
                 iface_n, ep_addr = 0, BULK_EP
             kicks = 0
             fails = 0
-            FRAME_PERIOD = 0.105     # ~9-10 fps, matches Seek SDK pacing
+            period = 0.040            # start optimistic: try the 25 fps spec
+            MIN_PERIOD, MAX_PERIOD = 0.040, 0.115
             last_ok = time.time()
             while not self.stop_flag.is_set():
-                wait = FRAME_PERIOD - (time.time() - last_ok)
+                wait = period - (time.time() - last_ok)
                 if wait > 0:
                     time.sleep(wait)
                 t0 = time.time()
@@ -171,12 +172,17 @@ class Stream(threading.Thread):
                     while len(buf) < FRAME_BYTES and not self.stop_flag.is_set():
                         buf.extend(dev.read(ep_addr, CHUNK, 500))
                     last_ok = time.time()
+                    dt = last_ok - t0
+                    if fails == 0 and period > MIN_PERIOD:
+                        period = max(MIN_PERIOD, period - 0.005)
+                        if kicks % 12 == 0:
+                            self.put(("log", "pacing %.0f ms (dt %.0f ms) ~ %.1fkicks/s" % (period*1000, dt*1000, 1.0/period)))
                     fails = 0
                 except usb.core.USBError as ue:
                     fails += 1
                     self.trace("BULK FAIL %s (fails=%d): %s" % (type(ue).__name__, fails, ue))
                     if fails == 3:
-                        self.put(("log", "stream stalled - resetting camera mode"))
+                        self.put(("log", "stalled - resetting mode, pacing %.0f ms" % (period*1000)))
                         try:
                             self.ctrl_out(0x3c, b"\x00\x00")
                             self.ctrl_out(0x3e, b"\x08\x00")
@@ -192,6 +198,7 @@ class Stream(threading.Thread):
                         return
                     if fails <= 3:
                         time.sleep(0.1)
+                        period = min(MAX_PERIOD, period * 1.3)
                     continue
                 if len(buf) == FRAME_BYTES:
                     self.put(("frame", bytes(buf)))
