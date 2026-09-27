@@ -443,24 +443,29 @@ class Viewer(wx.Frame):
             return cached[1]
         if self.frame_raw is None:
             return None
-        raw, fid = decode_frame(self.frame_raw)
-        self.last_fid = fid
-        if fid != 3:
+        raw = np.frombuffer(self.frame_raw, dtype="<u2").astype(np.float32)
+        raw = raw[:RAW_W * RAW_H].reshape(RAW_H, RAW_W)
+        img = raw[ROI_Y:ROI_Y + IMG_H, ROI_X:ROI_X + IMG_W]
+        fstd = float(img.std())
+        fmean = float(img.mean())
+        # a flat frame is the shutter reference (its pixels carry no scene)
+        if fstd < 25.0:
+            self.ffc = img.copy()
             self._bmp_cache = (self.frame_raw, None)
             return None
-        img_arr = raw[ROI_Y:ROI_Y + IMG_H, ROI_X:ROI_X + IMG_W]
-        # median 3x3 for stuck pixels only; no temporal smoothing
-        p1 = np.pad(img_arr, 1, mode="edge")
+        if self.ffc is not None:
+            img = img - self.ffc + 0x4000
+        p1 = np.pad(img, 1, mode="edge")
         stack = np.stack([p1[dy:dy+IMG_H, dx:dx+IMG_W] for dy in range(3) for dx in range(3)])
-        img_arr = np.median(stack, axis=0)
-        lo = float(np.percentile(img_arr, 2))
-        hi = float(np.percentile(img_arr, 98))
-        t = np.clip((img_arr - lo) / max(1.0, hi - lo), 0, 1)
+        img = np.median(stack, axis=0)
+        lo = float(np.percentile(img, 2))
+        hi = float(np.percentile(img, 98))
+        t = np.clip((img - lo) / max(1.0, hi - lo), 0, 1)
         rgb = COLORMAPS[self.lut_i][1](t).astype(np.uint8)
-        img = wx.Image(IMG_W, IMG_H, rgb.tobytes())
+        i2 = wx.Image(IMG_W, IMG_H, rgb.tobytes())
         vw = min(2 * self.W, 820)
         vh = int(vw * self.H / self.W)
-        bmp = wx.Bitmap(img.Scale(vw, vh, wx.IMAGE_QUALITY_NEAREST))
+        bmp = wx.Bitmap(i2.Scale(vw, vh, wx.IMAGE_QUALITY_NEAREST))
         self._bmp_cache = (self.frame_raw, bmp)
         return bmp
 
