@@ -443,33 +443,17 @@ class Viewer(wx.Frame):
         raw, fid = decode_frame(self.frame_raw)
         self.last_fid = fid
         img_arr = raw[ROI_Y:ROI_Y + IMG_H, ROI_X:ROI_X + IMG_W].copy()
-        if fid != 1 and fid != 3:
-            self.last_fid = fid
-            self.q.put(("log", "calibration frame (id %d) skipped" % fid))
-            return None
-        if fid == 1:
-            self.ffc_bank.append(img_arr)
-            if len(self.ffc_bank) > 8:
-                self.ffc_bank.pop(0)
-            self.ffc = np.mean(np.stack(self.ffc_bank), axis=0)
-            try:
-                open("ffc_latest.raw", "wb").write(bytearray(np.stack(self.ffc_bank).mean(axis=0).astype("<u2").tobytes()))
-                self.frame_ffc_saved = True
-            except Exception:
-                pass
+        # The camera already applies its own shutter correction. Subtracting
+        # another FFC on top of that gets worse at every click. Show the image.
+        mean = float(img_arr.mean())
+        if self.disp_prev is not None and abs(mean - float(self.disp_prev.mean())) > 400:
             self.disp_prev = None
             self.lo_ema = self.hi_ema = None
-            self.q.put(("log", "FFC frame bank=%d averaged" % len(self.ffc_bank)))
-            return None                # don't render the shutter frame itself
-        if self.ffc is not None:
-            img_arr = img_arr + OFFSET_BIAS - self.ffc   # libseek retrieve()
-        # median 3x3: kills dead pixels + salt noise
         p1 = np.pad(img_arr, 1, mode="edge")
         stack = np.stack([p1[dy:dy+IMG_H, dx:dx+IMG_W] for dy in range(3) for dx in range(3)])
         img_arr = np.median(stack, axis=0)
-        # temporal smoothing
-        if self.disp_prev is not None and self.ffc is not None:
-            img_arr = 0.45 * self.disp_prev + 0.55 * img_arr
+        if self.disp_prev is not None:
+            img_arr = 0.35 * self.disp_prev + 0.65 * img_arr
         self.disp_prev = img_arr.copy()
         # adaptive contrast: smoothed percentile bounds (no pumping flicker)
         lo = float(np.percentile(img_arr, 5))
