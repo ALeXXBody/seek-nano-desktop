@@ -5,61 +5,70 @@ using System.IO;
 
 class SeekNanoDriverInstaller
 {
+    static int RunTool(string exe, string args, bool hide)
+    {
+        var psi = new ProcessStartInfo(exe, args)
+        { UseShellExecute = false, CreateNoWindow = true };
+        using (var p = Process.Start(psi))
+        {
+            p.WaitForExit();
+            return p.ExitCode;
+        }
+    }
+
     static int Main()
     {
         try
         {
             string here = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? ".";
             string inf = Path.Combine(here, "seeknano.inf");
-            if (!File.Exists(inf))
-            {
-                Console.Error.WriteLine("seeknano.inf not found next to the installer.");
-                return 2;
-            }
+            string cat = Path.Combine(here, "seeknano.cat");
+            string cer = Path.Combine(here, "SeekNanoSigner.cer");
+            if (!File.Exists(inf)) { Console.Error.WriteLine("seeknano.inf not next to installer."); return 2; }
 
-            Console.WriteLine("Installing Seeking Nano WinUSB binding (VID 289D PID 0011)...");
-            var psi = new ProcessStartInfo(
-                Environment.SystemDirectory + "\\pnputil.exe",
-                "/add-driver \"" + inf + "\" /install")
-            { UseShellExecute = false, CreateNoWindow = true };
-            int exit = 1;
-            using (var p = Process.Start(psi))
+            // 1) optional: trust our self-signed signer locally
+            if (File.Exists(cat) && File.Exists(cer))
             {
-                p.WaitForExit();
-                exit = p.ExitCode;
-                Console.WriteLine("pnputil exit code: " + exit);
-            }
-
-            if (exit != 0)
-            {
-                // Unsigned INF refused by policy: route to the signed libusbK path via Zadig
-                Console.WriteLine();
-                Console.WriteLine("pnputil refused the unsigned INF (normal on Win 11).");
-                Console.WriteLine("Opening Zadig instead - its catalog is properly signed.");
-                Console.WriteLine();
-                Console.WriteLine("IN ZADIG:");
-                Console.WriteLine("  1) Options  -> List All Devices");
-                Console.WriteLine("  2) Pick the Seek entry with ID USB\\VID_289D&PID_0011");
-                Console.WriteLine("     (may appear as 'iAP' or 'com.thermal.pir324.3')");
-                Console.WriteLine("  3) Driver:  libusbK   (or WinUSB - both work)");
-                Console.WriteLine("  4) Press 'Install Driver' (5 seconds).");
-                Console.WriteLine();
-                Console.WriteLine("Then unplug and re-plug the camera and run SeekNano.exe.");
-                try
+                Console.WriteLine("Driver package is catalog-signed by 'SeekNano Project'.");
+                Console.Write("Trust this signing certificate on this machine (root+publisher)? [y/N] ");
+                var k = Console.ReadLine();
+                if (k != null && k.Trim().Equals("y", StringComparison.OrdinalIgnoreCase))
                 {
-                    Process.Start(new ProcessStartInfo("https://zadig.akeo.ie") {
-                        UseShellExecute = true });
+                    int r1 = RunTool("certutil.exe", "-addstore -f Root \"" + cer + "\"", false);
+                    int r2 = RunTool("certutil.exe", "-addstore -f TrustedPublisher \"" + cer + "\"", false);
+                    Console.WriteLine("cert store updates: root=" + r1 + " publisher=" + r2);
+                    if (r1 != 0 || r2 != 0)
+                        Console.WriteLine("Import failed - falling back to manual install.");
                 }
-                catch { /* browser may fail on locked-down machines */ }
+                else
+                {
+                    Console.WriteLine("Skipping trust - Windows will prompt or refuse; use manual path below.");
+                }
+            }
+
+            // 2) silent install of the INF (works when the catalog is trusted)
+            Console.WriteLine("Installing Seeking Nano WinUSB binding (VID 289D PID 0011)...");
+            int exit = RunTool(Environment.SystemDirectory + "\\pnputil.exe",
+                               "/add-driver \"" + inf + "\" /install", false);
+            Console.WriteLine("pnputil exit code: " + exit);
+            if (exit == 0)
+            {
+                Console.WriteLine("SUCCESS - unplug and re-plug the camera now.");
+                Console.WriteLine("USB\\VID_289D&PID_0011 now shows as 'WinUSB Device'.");
             }
             else
             {
-                Console.WriteLine("Success - unplug and re-plug the camera now.");
-                Console.WriteLine("USB\\VID_289D&PID_0011 should show as 'WinUSB Device'.");
+                Console.WriteLine("pnputil refused the INF/package.");
+                Console.WriteLine("Manual path - Device Manager:");
+                Console.WriteLine("  1) Other devices -> Seek Thermal (or unknown)");
+                Console.WriteLine("  2) Update driver -> Browse -> Let me pick");
+                Console.WriteLine("  3) Have Disk -> " + inf);
+                try { Process.Start(new ProcessStartInfo("https://zadig.akeo.ie") { UseShellExecute = true }); }
+                catch { }
             }
             Console.Write("Press Enter to close... ");
             Console.ReadLine();
-            return exit == 0 ? 0 : 0;   // never force-exit non-zero for UX purposes
+            return 0;
         }
         catch (Exception e)
         {
