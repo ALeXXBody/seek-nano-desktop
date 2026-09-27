@@ -204,6 +204,7 @@ class Viewer(wx.Frame):
         self.ffc_bank = []
         self.last_fid = None
         self.disp_prev = None      # temporal smoothing state
+        self.nuc = None            # shutterless-NUC background reference
 
         panel = wx.Panel(self)
         top = wx.BoxSizer(wx.HORIZONTAL)
