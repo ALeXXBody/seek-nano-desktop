@@ -28,7 +28,7 @@ jobs:
         run: |
           for /f "usebackq delims=" %%i in (`vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSPATH=%%i
           call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
-          cl /nologo /W4 /LD transport\native\seeknanousb.c /Fe:seeknanousb.dll /link winusb.lib setupapi.lib
+          cl /nologo /W4 /LD transport\native\seeknanousb.c /Fe:seeknanousb.dll /link winusb.lib setupapi.lib user32.lib
           if not exist seeknanousb.dll exit 1
       - name: build driver installer (csc)
         shell: powershell
