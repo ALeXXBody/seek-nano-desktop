@@ -55,6 +55,7 @@ jobs:
       - name: build exe
         run: |
           pyinstaller --onefile --windowed --name SeekNano `
+            --add-binary "libusb-1.0.dll;." `
             --add-binary "seeknanodirect.dll;." `
             --add-binary "seeknanousb.dll;." `
             --collect-all libusb_package `
