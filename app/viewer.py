@@ -156,22 +156,42 @@ class Stream(threading.Thread):
             else:
                 iface_n, ep_addr = 0, BULK_EP
             kicks = 0
+            fails = 0
+            FRAME_PERIOD = 0.105     # ~9-10 fps, matches Seek SDK pacing
+            last_ok = time.time()
             while not self.stop_flag.is_set():
+                wait = FRAME_PERIOD - (time.time() - last_ok)
+                if wait > 0:
+                    time.sleep(wait)
+                t0 = time.time()
                 self.ctrl_out(0x53, b"\x58\x5b\x01\x00")
                 kicks += 1
                 try:
                     buf = bytearray()
-                    n_chunks = 0
                     while len(buf) < FRAME_BYTES and not self.stop_flag.is_set():
-                        chunk = dev.read(ep_addr, CHUNK, 500)
-                        buf.extend(chunk)
-                        n_chunks += 1
-                        self.trace("kick %d chunk %d got %d B (total %d)" % (
-                            kicks, n_chunks, len(chunk), len(buf)))
+                        buf.extend(dev.read(ep_addr, CHUNK, 500))
+                    last_ok = time.time()
+                    fails = 0
                 except usb.core.USBError as ue:
-                    self.put(("log", "kick %d: FAIL %s (chunks=%d total=%d)" % (
-                        kicks, type(ue).__name__, n_chunks, len(buf))))
-                    self.trace("BULK FAIL %s: %s" % (type(ue).__name__, ue))
+                    fails += 1
+                    self.trace("BULK FAIL %s (fails=%d): %s" % (type(ue).__name__, fails, ue))
+                    if fails == 3:
+                        self.put(("log", "stream stalled - resetting camera mode"))
+                        try:
+                            self.ctrl_out(0x3c, b"\x00\x00")
+                            self.ctrl_out(0x3e, b"\x08\x00")
+                            time.sleep(0.05)
+                            self.ctrl_out(0x37, b"\xfc\x00\x04\x00")
+                            self.ctrl_out(0x3c, b"\x01\x00")
+                            self.ctrl_in(0x3d, 2)
+                            time.sleep(0.2)
+                        except Exception:
+                            pass
+                    if fails > 12:
+                        self.put(("error", "no frames for 12 kicks - camera unresponsive; press Stop then Start"))
+                        return
+                    if fails <= 3:
+                        time.sleep(0.1)
                     continue
                 if len(buf) == FRAME_BYTES:
                     self.put(("frame", bytes(buf)))
