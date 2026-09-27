@@ -200,8 +200,10 @@ class Viewer(wx.Frame):
         self.paused = False
         self.W, self.H = IMG_W, IMG_H
         self.geom_done = True
-        self.ffc = None            # flat-field reference frame
+        self.ffc = None            # flat-field reference frame (averaged)
+        self.ffc_bank = []
         self.last_fid = None
+        self.disp_prev = None      # temporal smoothing state
 
         panel = wx.Panel(self)
         top = wx.BoxSizer(wx.HORIZONTAL)
@@ -320,10 +322,27 @@ class Viewer(wx.Frame):
         self.last_fid = fid
         img_arr = raw[ROI_Y:ROI_Y + IMG_H, ROI_X:ROI_X + IMG_W].copy()
         if fid == 1:
-            self.ffc = img_arr          # shutter-closed calibration frame
-            self.q.put(("log", "FFC frame captured"))
+            self.ffc_bank.append(img_arr)
+            if len(self.ffc_bank) > 8:
+                self.ffc_bank.pop(0)
+            self.ffc = np.mean(np.stack(self.ffc_bank), axis=0)
+            try:
+                open("ffc_latest.raw", "wb").write(bytearray(np.stack(self.ffc_bank).mean(axis=0).astype("<u2").tobytes()))
+                self.frame_ffc_saved = True
+            except Exception:
+                pass
+            self.q.put(("log", "FFC frame bank=%d averaged" % len(self.ffc_bank)))
+            return None                # don't render the shutter frame itself
         if self.ffc is not None:
             img_arr = img_arr + OFFSET_BIAS - self.ffc   # libseek retrieve()
+            # median 3x3: kills dead pixels + salt noise
+            p1 = np.pad(img_arr, 1, mode="edge")
+            stack = np.stack([p1[dy:dy+IMG_H, dx:dx+IMG_W] for dy in range(3) for dx in range(3)])
+            img_arr = np.median(stack, axis=0)
+        # temporal smoothing
+        if self.disp_prev is not None and self.ffc is not None:
+            img_arr = 0.45 * self.disp_prev + 0.55 * img_arr
+        self.disp_prev = img_arr.copy()
         vmin = float(np.percentile(img_arr, 2))
         vmax = float(np.percentile(img_arr, 98))
         vrange = max(1.0, vmax - vmin)
