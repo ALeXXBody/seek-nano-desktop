@@ -155,6 +155,12 @@ class Stream(threading.Thread):
             self.ctrl_in(0x3d, 2)
             self.q.put(("status", "streaming mode enabled - pumping frames"))
 
+            if eps:
+                self.ep_i = 0
+                iface_n, ep_addr = eps[self.ep_i]
+                self.put(("log", "using iface %d ep %#x" % (iface_n, ep_addr)))
+            else:
+                iface_n, ep_addr = 0, BULK_EP
             kicks = 0
             while not self.stop_flag.is_set():
                 self.ctrl_out(0x53, b"\x58\x5b\x01\x00")
