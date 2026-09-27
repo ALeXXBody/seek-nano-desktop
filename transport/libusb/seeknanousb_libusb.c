@@ -40,7 +40,7 @@ static int  (*p_libusb_bulk_transfer)(libusb_device_handle, unsigned char, unsig
 static int  (*p_libusb_control_transfer)(libusb_device_handle, unsigned char, unsigned char, unsigned short, unsigned short, unsigned char*, unsigned short, unsigned);
 static int  (*p_libusb_clear_halt)(libusb_device_handle, unsigned char);
 static void (*p_libusb_close)(libusb_device_handle);
-static int  (*p_libusb_set_auto_detach_kernel_driver)(libusb_device_handle, int);
+static int  (*p_libusb_set_configuration)(libusb_device_handle, int);
 
 static struct { const char* name; void** pp; } syms[] = {
     { "libusb_init",                        (void**)&p_libusb_init },
@@ -52,7 +52,7 @@ static struct { const char* name; void** pp; } syms[] = {
     { "libusb_control_transfer",            (void**)&p_libusb_control_transfer },
     { "libusb_clear_halt",                  (void**)&p_libusb_clear_halt },
     { "libusb_close",                       (void**)&p_libusb_close },
-    { "libusb_set_auto_detach_kernel_driver",(void**)&p_libusb_set_auto_detach_kernel_driver },
+    { "libusb_set_configuration",            (void**)&p_libusb_set_configuration },
 };
 
 #define SYM_N (sizeof(syms)/sizeof(syms[0]))
@@ -78,7 +78,7 @@ __declspec(dllexport) int SNLB_open(void)
     if (r) return r;
     g_dev = p_libusb_open_device_with_vid_pid(g_ctx, 0x289D, 0x0011);
     if (!g_dev) return -1;
-    p_libusb_set_auto_detach_kernel_driver(g_dev, 1);   /* best effort */
+    p_libusb_set_configuration(g_dev, 1);
     r = p_libusb_claim_interface(g_dev, 0);
     if (r != 0) return -2;
     g_claimed = 1;
@@ -146,24 +146,38 @@ static void le32(unsigned char* d, unsigned v)
     d[0] = v & 0xFF; d[1] = v >> 8; d[2] = v >> 16; d[3] = v >> 24;
 }
 
+static void nlog(const char* m)
+{
+    HANDLE h = CreateFileA("seeknano_native.log", FILE_APPEND_DATA, FILE_SHARE_READ,
+                           NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD n = 0;
+    WriteFile(h, m, (DWORD)lstrlenA(m), &n, NULL);
+    WriteFile(h, "\r\n", 2, &n, NULL);
+    CloseHandle(h);
+}
+
 __declspec(dllexport) int SNLB_stream_start(void)
 {
     if (!g_claimed) return -1;
     unsigned char z2[2] = { 0, 0 };
     unsigned char st[2];
-    if (c_out(0x54, 2, z2)  < 0) return -10;   /* TARGET_PLATFORM (as phone used ilk 0)   */
-    if (c_out(0x3C, 2, z2)  < 0) return -11;   /* SET_OPERATION_MODE = 0                  */
-    if (c_in(0x3D, 2, st)   < 0) return -12;
+    int r;
+    nlog("start");
+    r = c_out(0x54, 2, z2);  nlog(r < 0 ? "54 fail" : "54 ok"); if (r < 0) return -10;
+    r = c_out(0x3C, 2, z2);  nlog(r < 0 ? "3c fail" : "3c ok"); if (r < 0) return -11;
+    r = c_in(0x3D, 2, st);   nlog(r < 0 ? "3d fail" : "3d ok"); if (r < 0) return -12;
     unsigned char imgproc[2] = { 0x08, 0x00 };
-    if (c_out(0x3E, 2, imgproc) < 0) return -13;
+    r = c_out(0x3E, 2, imgproc); nlog(r < 0 ? "3e fail" : "3e ok"); if (r < 0) return -13;
     Sleep(5);
     unsigned char cfg[4]  = { 0xfc, 0x00, 0x04, 0x00 };
     unsigned char on[2]   = { 0x01, 0x00 };
-    if (c_out(0x37, 4, cfg) < 0) return -14;
-    if (c_out(0x3C, 2, on)  < 0) return -15;
-    if (c_in(0x3D, 2, st)   < 0) return -16;
+    r = c_out(0x37, 4, cfg); nlog(r < 0 ? "37 fail" : "37 ok"); if (r < 0) return -14;
+    r = c_out(0x3C, 2, on);  nlog(r < 0 ? "3c1 fail" : "3c1 ok"); if (r < 0) return -15;
+    r = c_in(0x3D, 2, st);   nlog(r < 0 ? "3d1 fail" : "3d1 ok"); if (r < 0) return -16;
     p_libusb_clear_halt(g_dev, 0x81);
     g_streaming = 1;
+    nlog("streaming");
     return 0;
 }
 
