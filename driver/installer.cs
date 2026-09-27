@@ -63,8 +63,7 @@ class SeekNanoDriverInstaller
                 Console.WriteLine("  1) Other devices -> Seek Thermal (or unknown)");
                 Console.WriteLine("  2) Update driver -> Browse -> Let me pick");
                 Console.WriteLine("  3) Have Disk -> " + inf);
-                try { Process.Start(new ProcessStartInfo("https://zadig.akeo.ie") { UseShellExecute = true }); }
-                catch { }
+                // (Zadig path removed per user request)
             }
             Console.Write("Press Enter to close... ");
             Console.ReadLine();
