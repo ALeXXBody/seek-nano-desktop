@@ -1,0 +1,52 @@
+; Seek Nano (PIR324) raw WinUSB binding
+; vid 289D pid 0011 - composite vendor-class device
+[Version]
+Signature   = "$Windows NT$"
+Class       = USB
+ClassGuid   = {36fc9e60-c465-11cf-8056-444553540000}
+Provider    = %ProviderName%
+DriverVer   = 09/27/2026,1.0.0.0
+
+[Manufacturer]
+%ProviderName% = Standard, NTamd64
+
+[Standard.NTamd64]
+%DeviceName% = WINUSB_Install, USB\VID_289D&PID_0011
+
+[WINUSB_Install]
+Include = winusb.inf
+Needs   = WINUSB.NT
+
+[WINUSB_Install.Services]
+AddService = winusb, 0x00000002, winusb_ServiceInstall
+
+[winusb_ServiceInstall]
+DisplayName   = %WinUsbService%
+ServiceType   = 1  ; SERVICE_KERNEL_DRIVER
+StartType     = 3  ; demand start
+ErrorControl  = 1
+ServiceBinary = %12%\winusb.sys
+
+[WINUSB_Install.HW]
+AddReg = DevGuidReg
+
+[DevGuidReg]
+HKR,,DeviceInterfaceGUIDs,0x10000,"{1BA6F5C0-2A6D-4B02-9F73-4E4408D4F7D0}"
+; keep the device awake while viewers are running (battery laptops stall bulk streams)
+HKR,,"SSEnable"        ,0x00010001,0
+HKR,,"SelectiveSuspendOn",0x00010001,0
+HKR,,"IdleInWorkingState",0x00010001,0
+
+[Standard.NTamd64.Services]
+WINUSB_Install = WINUSB_Install.Services
+
+[Standard.NTamd64.HW]
+AddReg = DevGuidReg.Standard
+
+[DevGuidReg.Standard]
+HKR,,DeviceInterfaceGUIDs,0x10000,"{1C2BD42A-95E0-4D26-9A79-E1F2C86AC389}"
+
+[Strings]
+ProviderName   = "SeekNano Open Project"
+DeviceName     = "Seek Nano Thermal (WinUSB)"
+WinUsbService  = "WinUSB"
