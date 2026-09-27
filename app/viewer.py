@@ -336,32 +336,18 @@ class Viewer(wx.Frame):
             return None                # don't render the shutter frame itself
         if self.ffc is not None:
             img_arr = img_arr + OFFSET_BIAS - self.ffc   # libseek retrieve()
-        # shutterless NUC: maintain slow background reference of raw scene values
-        if self.nuc is None:
-            self.nuc = img_arr.copy()
-        else:
-            self.nuc = 0.995 * self.nuc + 0.005 * img_arr
-        nuc_sub = img_arr - self.nuc + 6400.0
-        # per-column/per-row fixed offsets (readout stripes)
-        nuc_sub = nuc_sub - nuc_sub.mean(axis=0, keepdims=True) - \
-                  nuc_sub.mean(axis=1, keepdims=True) + nuc_sub.mean()
         # median 3x3: kills dead pixels + salt noise
-        p1 = np.pad(nuc_sub, 1, mode="edge")
+        p1 = np.pad(img_arr, 1, mode="edge")
         stack = np.stack([p1[dy:dy+IMG_H, dx:dx+IMG_W] for dy in range(3) for dx in range(3)])
-        nuc_sub = np.median(stack, axis=0)
+        img_arr = np.median(stack, axis=0)
         # temporal smoothing
         if self.disp_prev is not None and self.ffc is not None:
-            nuc_sub = 0.45 * self.disp_prev + 0.55 * nuc_sub
-        self.disp_prev = nuc_sub.copy()
-        # adaptive contrast: robust percentile stretch + gamma + unsharp
-        lo = float(np.percentile(nuc_sub, 5))
-        hi = float(np.percentile(nuc_sub, 95))
-        t = np.clip((nuc_sub - lo) / max(1.0, hi - lo), 0, 1) ** 0.85
-        # mild unsharp mask (3x3)
-        p2 = np.pad(t, 1, mode="edge")
-        blur = (p2[0:-2, 1:-1] + p2[2:, 1:-1] + p2[1:-1, 0:-2] + p2[1:-1, 2:] +
-                2.0 * p2[1:-1, 1:-1]) / 6.0
-        t = np.clip(1.35 * t - 0.35 * blur, 0, 1)
+            img_arr = 0.45 * self.disp_prev + 0.55 * img_arr
+        self.disp_prev = img_arr.copy()
+        # adaptive contrast: robust percentile stretch + gamma
+        lo = float(np.percentile(img_arr, 5))
+        hi = float(np.percentile(img_arr, 95))
+        t = np.clip((img_arr - lo) / max(1.0, hi - lo), 0, 1) ** 0.85
         rgb = COLORMAPS[self.lut_i][1](t).astype(np.uint8)
         img = wx.Image(IMG_W, IMG_H, rgb.tobytes())
         vw = min(2 * self.W, 820)
