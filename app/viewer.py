@@ -616,16 +616,46 @@ def _crashlog(fn, *a):
         import ctypes
         ctypes.windll.user32.MessageBoxW(None, "crash.txt written next to the exe", "SeekNano", 0x10)
 
-if __name__ == "__main__":
-    if "--serve" in sys.argv:
-        port = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 5005
-        _crashlog(serve_mode, port)
-    else:
-        _crashlog(lambda: (wx.App(False), Viewer().Show(True), (_ for _ in ()).throw(SystemExit)) if False else _run_gui())
+def selftest():
+    results = []
+    for modstr in ("wx", "numpy", "queue", "PIL"):
+        try:
+            __import__(modstr)
+            results.append((modstr, "ok"))
+        except Exception as e:
+            results.append((modstr, "FAIL " + repr(e)))
+    for dname in ("seeknanodirect.dll", "seeknanousb.dll"):
+        try:
+            ctypes.CDLL(dname)
+            results.append((dname, "ok"))
+        except Exception as e:
+            results.append((dname, "missing (install SeekNanoDriverInstaller first)"))
+    try:
+        import libusb_package
+        libusb_package.get_libusb1_backend()
+        results.append(("libusb-1.0 backend", "ok"))
+    except Exception as e:
+        results.append(("libusb-1.0 backend", "FAIL " + repr(e)))
+    print("\n".join("%-22s %s" % (a, b) for a, b in results))
+    # exit 1 if anything critical failed
+    crit = [r for r in results if r[0] in ("wx", "numpy")]
+    for r in crit:
+        if "FAIL" in r[1]:
+            sys.exit(1)
+    sys.exit(0)
 
 def _run_gui():
     app = wx.App(False)
     v = Viewer()
     v.Show(True)
     app.MainLoop()
+
+if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        selftest()
+    elif "--serve" in sys.argv:
+        port = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 5005
+        _crashlog(serve_mode, port)
+    else:
+        _crashlog(_run_gui)
 
