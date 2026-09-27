@@ -116,8 +116,8 @@ class Stream(threading.Thread):
         self.trace("R req=0x%02x len=%d -> %s" % (request, length, r.hex()))
         return r
 
-    def status_unused(self, text):
-        self.q.put(("status", text))
+    def put(self, item):
+        self.q.put(item)
 
     def run(self):
         try:
