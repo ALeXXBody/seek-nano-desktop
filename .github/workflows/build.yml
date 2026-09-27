@@ -48,6 +48,16 @@ jobs:
           call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
           cl /nologo /W4 /LD transport\native\seeknanousb.c /Fe:seeknanousb.dll /link winusb.lib setupapi.lib user32.lib
           if not exist seeknanousb.dll exit 1
+      - name: build libwdi installer
+        shell: cmd
+        run: |
+          git clone --depth 1 https://github.com/pbatard/libwdi.git libwdi-src
+          for /f "usebackq delims=" %%i in (`vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
+          msbuild libwdi-src\libwdi.sln /p:Configuration=Release /p:Platform=x64 /m /t:wdi-simple
+          dir /s /b libwdi-src\*wdi-simple.exe
+          for /f "delims=" %%f in ('dir /s /b libwdi-src\*wdi-simple.exe') do copy /y "%%f" driver\wdi-simple.exe
+          if not exist driver\wdi-simple.exe exit 1
       - name: build driver installer (csc)
         shell: powershell
         run: |
