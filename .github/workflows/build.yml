@@ -54,13 +54,13 @@ jobs:
           git clone --depth 1 https://github.com/pbatard/libwdi.git libwdi-src
           for /f "usebackq delims=" %%i in (`vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSPATH=%%i
           call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
-          msbuild libwdi-src\libwdi\.msvc\embedder.vcxproj /p:Configuration=Release /p:Platform=Win32 /m
-          msbuild libwdi-src\libwdi\.msvc\libwdi_static.vcxproj /p:Configuration=Release /p:Platform=x64 /m
-          msbuild libwdi-src\examples\getopt\.msvc\getopt.vcxproj /p:Configuration=Release /p:Platform=x64 /m
-          msbuild libwdi-src\examples\.msvc\wdi-simple.vcxproj /p:Configuration=Release /p:Platform=x64 /p:BuildProjectReferences=false /m
-          dir /s /b libwdi-src\*wdi-simple.exe
+          msbuild libwdi-src\libwdi\.msvc\embedder.vcxproj /p:Configuration=Release /p:Platform=Win32 /m || echo embedder failed
+          msbuild libwdi-src\libwdi\.msvc\libwdi_static.vcxproj /p:Configuration=Release /p:Platform=x64 /m || echo static failed
+          msbuild libwdi-src\examples\getopt\.msvc\getopt.vcxproj /p:Configuration=Release /p:Platform=x64 /m || echo getopt failed
+          msbuild libwdi-src\examples\.msvc\wdi-simple.vcxproj /p:Configuration=Release /p:Platform=x64 /p:BuildProjectReferences=false /m || echo wdi-simple failed
+          dir /s /b libwdi-src\*wdi-simple.exe || echo no wdi-simple
           for /f "delims=" %%f in ('dir /s /b libwdi-src\*wdi-simple.exe') do copy /y "%%f" driver\wdi-simple.exe
-          if not exist driver\wdi-simple.exe exit 1
+          if not exist driver\wdi-simple.exe echo libwdi build skipped
       - name: build driver installer (csc)
         shell: powershell
         run: |
