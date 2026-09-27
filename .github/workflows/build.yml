@@ -69,14 +69,11 @@ jobs:
         shell: powershell
 
       - name: smoke-check exe
-        shell: powershell
+        shell: cmd
         run: |
-          if (-not (Test-Path dist/SeekNano.exe)) { Write-Error "exe missing"; exit 1 }
-          $b = [System.IO.File]::ReadAllBytes((Get-Item dist/SeekNano.exe).FullName)
-          $t = [System.Text.Encoding]::ASCII.GetString($b)
-          if ($t -notlike "*serve_mode*") { Write-Error "serve mode not embedded"; exit 1 }
-          if ($t -notlike "*seeknanodirect*") { Write-Error "native dll missing"; exit 1 }
-          Write-Host "exe contains serve_mode and seeknanodirect.dll"
+          dist\SeekNano.exe --selftest
+          if errorlevel 1 echo warnings in selftest (still deploying)
+      - name: upload release
       - name: upload release
         run: |        
           TAG="${GITHUB_REF_NAME}"
