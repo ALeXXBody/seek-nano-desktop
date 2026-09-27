@@ -79,8 +79,76 @@ def decode_frame(frame_raw):
     return raw, fid
 
 
+# native WinUSB transport (proper driver path) - used when the DLL is present
+_ctdll = None
+try:
+    import ctypes
+    _c = ctypes.CDLL("seeknanousb.dll")
+    _c.SN_open.restype = ctypes.c_int
+    _c.SN_stream_start.restype = ctypes.c_int
+    _c.SN_get_frame.restype = ctypes.c_int
+    _c.SN_get_frame.argtypes = [ctypes.c_char_p]
+    _c.SN_stream_stop.restype = ctypes.c_int
+    _c.SN_close.restype = None
+    _ctdll = _c
+except Exception:
+    _ctdll = None
+
+
+class NativeStream(threading.Thread):
+    """driver-grade path: overlapped WinUSB reads in C, one call per frame."""
+    def __init__(self, q):
+        super().__init__(daemon=True)
+        self.q = q
+        self.stop_flag = threading.Event()
+        self.buf = ctypes.create_string_buffer(FRAME_BYTES)
+        self.dll = _ctdll
+        self.dev = None
+
+    def run(self):
+        if self.dll.SN_open() != 0:
+            self.q.put(("error", "native open failed - is the INF installed? "
+                                "run SeekNanoDriverInstaller.exe; falling back"))
+            try:
+                NativeFallback(self.q).run()
+            except Exception:
+                pass
+            return
+        self.dev = True
+        self.q.put(("log", "native WinUSB transport opened"))
+        if self.dll.SN_stream_start() != 0:
+            self.q.put(("error", "native handshake failed (SN_stream_start)"))
+            self.dll.SN_close()
+            return
+        self.q.put(("status", "native streaming - 25fps capable"))
+        fails = 0
+        while not self.stop_flag.is_set():
+            t0 = time.time()
+            n = self.dll.SN_get_frame(self.buf)
+            dt = time.time() - t0
+            if n == FRAME_BYTES:
+                fails = 0
+                self.q.put(("frame", bytes(self.buf.raw)))
+                self.q.put(("info", "frame %.0f ms" % (dt * 1000)))
+                if self.stop_flag.is_set():
+                    break
+                d = 0.04 - dt
+                if d > 0:
+                    time.sleep(d)
+            else:
+                fails += 1
+                self.q.put(("log", "native fail %d (%d/%d B)" % (fails, n, FRAME_BYTES)))
+                if fails > 12:
+                    self.q.put(("error", "native pump stalled - stop/start"))
+                    break
+                time.sleep(0.2)
+        self.dll.SN_stream_stop()
+        self.dll.SN_close()
+
+
+
 class Stream(threading.Thread):
-    def __init__(self, q, status_cb):
+    def __init__(self, q, status_cb=None):
         super().__init__(daemon=True)
         self.q = q
         self.status_cb = status_cb
@@ -287,7 +355,10 @@ class Viewer(wx.Frame):
             return
         self.frame_raw = None
         self.push_status("starting ...")
-        self.stream_thread = Stream(self.q, self)
+        if _ctdll is not None:
+            self.stream_thread = NativeStream(self.q)
+        else:
+            self.stream_thread = Stream(self.q)
         self.stream_thread.start()
         self.start_btn.SetLabel("Stop stream")
 
