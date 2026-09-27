@@ -23,6 +23,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pyusb numpy pyinstaller libusb-package wxPython
 
+      - name: build native transport dll (cl)
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cl /nologo /W4 /LD transport\native\seeknanousb.c /Fe:seeknanousb.dll /link winusb.lib setupapi.lib
+          if not exist seeknanousb.dll exit 1
       - name: build driver installer (csc)
         shell: powershell
         run: |
@@ -30,6 +36,7 @@ jobs:
       - name: build exe
         run: |
           pyinstaller --onefile --windowed --name SeekNano `
+            --add-binary "seeknanousb.dll;." `
             --collect-all libusb_package `
             --hidden-import usb.backend.libusb10 `
             app/viewer.py
