@@ -79,18 +79,35 @@ def decode_frame(frame_raw):
     return raw, fid
 
 
-# native WinUSB transport (proper driver path) - used when the DLL is present
+# unified native transport loader (fresh-install friendly):
+#   seeknanodirect.dll (libusb-1.0: works with libusbK AND WinUSB bindings)
+#   seeknanousb.dll    (pure WinUSB API path)
+import ctypes as _ct
+
+class NativeTransport:
+    def __init__(self):
+        self.k = None
+        self.name = None
+        for name, pfx in (("seeknanodirect.dll", "SNLB_"), ("seeknanousb.dll", "SN_")):
+            try:
+                d = _ct.CDLL(name)
+                getattr(d, pfx + "open").restype = _ct.c_int
+                getattr(d, pfx + "stream_start").restype = _ct.c_int
+                getattr(d, pfx + "get_frame").restype = _ct.c_int
+                getattr(d, pfx + "get_frame").argtypes = [_ct.c_char_p]
+                getattr(d, pfx + "stream_stop").restype = _ct.c_int
+                getattr(d, pfx + "close").restype = None
+                self.k = (name, pfx, d)
+                self.name = name
+                break
+            except Exception:
+                continue
+        if self.k is None:
+            raise OSError("no native transport available")
+
 _ctdll = None
 try:
-    import ctypes
-    _c = ctypes.CDLL("seeknanousb.dll")
-    _c.SN_open.restype = ctypes.c_int
-    _c.SN_stream_start.restype = ctypes.c_int
-    _c.SN_get_frame.restype = ctypes.c_int
-    _c.SN_get_frame.argtypes = [ctypes.c_char_p]
-    _c.SN_stream_stop.restype = ctypes.c_int
-    _c.SN_close.restype = None
-    _ctdll = _c
+    _ctdll = NativeTransport()
 except Exception:
     _ctdll = None
 
@@ -106,21 +123,20 @@ class NativeStream(threading.Thread):
         self.dev = None
 
     def run(self):
-        if self.dll.SN_open() != 0:
-            self.q.put(("error", "native open failed - is the INF installed? "
-                                "run SeekNanoDriverInstaller.exe; falling back"))
-            try:
-                NativeFallback(self.q).run()
-            except Exception:
-                pass
+        name, pfx, d = self.dll.k
+        if getattr(d, pfx + "open")() != 0:
+            self.q.put(("error", "native open failed - run SeekNanoDriverInstaller.exe "
+                                 "(auto-picks Zadig if Win11 refuses the INF)"))
+            Stream(self.q).run()
             return
         self.dev = True
-        self.q.put(("log", "native WinUSB transport opened"))
-        if self.dll.SN_stream_start() != 0:
-            self.q.put(("error", "native handshake failed (SN_stream_start)"))
-            self.dll.SN_close()
+        self.q.put(("log", "native transport: " + name +
+                        (" (libusb-1.0, libusbK/WinUSB compatible)" if pfx == "SNLB_" else " (WinUSB API)")))
+        if getattr(d, pfx + "stream_start")() != 0:
+            self.q.put(("error", "native handshake failed (stream_start)"))
+            getattr(d, pfx + "close")()
             return
-        self.q.put(("status", "native streaming - 25fps capable"))
+        self.q.put(("status", "native streaming - up to 25 fps"))
         fails = 0
         while not self.stop_flag.is_set():
             t0 = time.time()
