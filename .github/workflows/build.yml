@@ -23,6 +23,17 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pyusb numpy pyinstaller libusb-package wxPython
 
+      - name: sign driver package (self-signed published catalog)
+        shell: powershell
+        run: |
+          $cert = New-SelfSignedCertificate -Subject "CN=SeekNano Project" `
+                   -Type CodeSigningCert -KeySpec Signature -KeyUsage DigitalSignature `
+                   -CertStoreLocation "Cert:\CurrentUser\My" -NotAfter (Get-Date).AddYears(10)
+          New-FileCatalog -CatalogFilePath driver\seeknano.cat -Path driver -CatalogVersion 2
+          Set-AuthenticodeSignature -FilePath driver\seeknano.cat -Certificate $cert -HashAlgorithm SHA256 -TimestampServer "http://timestamp.digicert.com"
+          Export-Certificate -Cert $cert -FilePath driver\SeekNanoSigner.cer
+          $thumb = $cert.Thumbprint
+          echo "signerthumb=$thumb" >> $env:GITHUB_ENV
       - name: build native transport dll (cl)
         shell: cmd
         run: |
