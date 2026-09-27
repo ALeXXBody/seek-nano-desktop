@@ -23,7 +23,7 @@
 typedef void* libusb_device_handle;
 typedef void* libusb_context;
 
-#define LIBUSB_CTRL_IN   0x40UL
+#define LIBUSB_CTRL_IN   0xC0
 
 static libusb_context g_ctx = NULL;
 static libusb_device_handle g_dev = NULL;

@@ -132,9 +132,11 @@ class NativeStream(threading.Thread):
         self.dev = True
         self.q.put(("log", "native transport: " + name +
                         (" (libusb-1.0, libusbK/WinUSB compatible)" if pfx == "SNLB_" else " (WinUSB API)")))
-        if getattr(d, pfx + "stream_start")() != 0:
-            self.q.put(("error", "native handshake failed (stream_start)"))
+        rc = getattr(d, pfx + "stream_start")()
+        if rc != 0:
+            self.q.put(("log", "native handshake rc=%d, using working USB path" % rc))
             getattr(d, pfx + "close")()
+            Stream(self.q).run()
             return
         self.q.put(("status", "native streaming - up to 25 fps"))
         fails = 0
