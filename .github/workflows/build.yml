@@ -36,7 +36,7 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           case "$TAG" in v*) ;; *) TAG="v0.2.0-manual";; esac
           EXE_FILE=$(ls dist/*.exe | head -1)
-          (cd driver && zip -q ../SeekNano-driver.zip seeknano.inf install.ps1) || true
+          7z a -tzip SeekNano-driver.zip ./driver/seeknano.inf ./driver/install.ps1 || echo "no 7z,skip"
           gh release create "$TAG" "$EXE_FILE" SeekNano-driver.zip --repo "$GITHUB_REPOSITORY" \
             --title "Seek Nano Viewer $TAG" \
             --notes "Download, run, plug the Nano in. First-time Windows driver step: install the libusb-win32/WinUSB driver with Zadig (see README)." || \
