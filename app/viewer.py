@@ -14,7 +14,11 @@ import time
 import numpy as np
 import wx
 
-app_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+# keep next to the .exe (not PyInstaller's temp _MEIxxxx dir, Windows deletes it)
+if getattr(sys, "frozen", False):
+    app_dir = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    app_dir = os.path.dirname(os.path.abspath(__file__))
 os.chdir(app_dir)
 
 import usb.core
@@ -65,11 +69,22 @@ CFG_FILE = "seeknano_geom.json"
 
 
 def auto_geometry(frame_raw):
-    """Find (width, height, byte_offset) maximizing 2D sharpness of the u16 array.
-    Rows/cols that look like padding (near constant) penalize wrong layouts."""
-    import math
+    """Find (width, height) maximizing 2D sharpness of the u16 array while
+    EXCLUDING the 6,840-byte bulk chunk seams (they inject fake discontinuity)."""
     arr = np.frombuffer(frame_raw, dtype="<u2").astype(np.float32)
     n = len(arr)
+    seam_samples = 6840 // 2           # 3420 samples per chunk
+    nsamp = len(arr)
+    mask = np.ones(nsamp, dtype=bool)
+    # mask out samples near every seam
+    for c in range(1, nsamp // seam_samples + 2):
+        i0 = c * seam_samples
+        if i0 < nsamp:
+            lo = max(0, i0 - 160)
+            hi = min(nsamp, i0 + 160)
+            mask[lo:hi] = False
+    if mask.sum() < 10000:
+        mask = np.ones(nsamp, dtype=bool)
     divs = [d for d in range(100, 700) if n % d == 0]
     best = None
     for W in divs:
@@ -77,12 +92,17 @@ def auto_geometry(frame_raw):
         if H < 80 or H > 700:
             continue
         try:
-            img = arr.reshape(H, W)
+            img = arr[:H * W].reshape(H, W)
         except ValueError:
             continue
-        gradH = np.abs(np.diff(img[:, :min(W, 340)], axis=1)).mean()
-        gradV = np.abs(np.diff(img[:, :min(W, 340)], axis=0)).mean()
-        sharpness = gradH + gradV
+        m = mask[:H * W].reshape(H, W)
+        gH = np.zeros((H, W - 1), dtype=np.float32)
+        gV = np.zeros((H - 1, W), dtype=np.float32)
+        np.abs(np.diff(img, axis=1), out=gH)
+        np.abs(np.diff(img, axis=0), out=gV)
+        sharpH = gH[m[:, :-1]].mean() if m[:, :-1].any() else 0
+        sharpV = gV[m[:-1, :]].mean() if m[:-1, :].any() else 0
+        sharpness = sharpH + 0.5 * sharpV
         if best is None or sharpness > best[0]:
             best = (sharpness, W, H)
     if best:
