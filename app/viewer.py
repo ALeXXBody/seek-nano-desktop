@@ -343,10 +343,16 @@ class Viewer(wx.Frame):
         if self.disp_prev is not None and self.ffc is not None:
             img_arr = 0.45 * self.disp_prev + 0.55 * img_arr
         self.disp_prev = img_arr.copy()
-        vmin = float(np.percentile(img_arr, 2))
-        vmax = float(np.percentile(img_arr, 98))
-        vrange = max(1.0, vmax - vmin)
-        t = np.clip((img_arr.astype(np.float32) - vmin) / vrange, 0, 1)
+        # adaptive contrast: robust percentile stretch + gamma + unsharp
+        lo = float(np.percentile(img_arr, 5))
+        hi = float(np.percentile(img_arr, 95))
+        t = np.clip((img_arr.astype(np.float32) - lo) / max(1.0, hi - lo), 0, 1)
+        t = t ** 0.85
+        # mild unsharp mask (3x3)
+        p2 = np.pad(t, 1, mode="edge")
+        blur = (p2[0:-2, 1:-1] + p2[2:, 1:-1] + p2[1:-1, 0:-2] + p2[1:-1, 2:] +
+                2.0 * p2[1:-1, 1:-1]) / 6.0
+        t = np.clip(1.35 * t - 0.35 * blur, 0, 1)
         rgb = COLORMAPS[self.lut_i][1](t).astype(np.uint8)
         img = wx.Image(IMG_W, IMG_H, rgb.tobytes())
         vw = min(2 * self.W, 820)
