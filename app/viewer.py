@@ -101,10 +101,11 @@ class Stream(threading.Thread):
         except Exception:
             self.logf = None
 
-    def trace(self, line):
+    def trace(self, line, to_ui=False):
         if self.logf:
             self.logf.write("%.3f %s\n" % (time.time(), line))
-        self.q.put(("log", line))
+        if to_ui:
+            self.q.put(("log", line))
 
     def ctrl_out(self, request, payload):
         self.trace("W req=0x%02x data=%s" % (request, payload.hex()))
