@@ -52,6 +52,11 @@ jobs:
         shell: powershell
         run: |
           & C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /out:driver/SeekNanoDriverInstaller.exe /win32manifest:driver\\admin.manifest driver\\installer.cs
+      - name: copy bundled libusb-1.0.dll
+        shell: bash
+        run: |
+          python -c "import libusb_package, shutil, os; shutil.copy2(os.path.join(os.path.dirname(libusb_package.__file__), 'libusb-1.0.dll'), '.')"
+          ls -la libusb-1.0.dll
       - name: build exe
         run: |
           pyinstaller --onefile --windowed --name SeekNano `
@@ -71,7 +76,7 @@ jobs:
           rm -f driver/install.ps1 driver/installer.cs && 7z a -tzip SeekNano-driver.zip ./driver/* seeknanousb.dll
           gh release create "$TAG" "$EXE_FILE" SeekNano-driver.zip --repo "$GITHUB_REPOSITORY" \
             --title "Seek Nano Viewer $TAG" \
-            --notes "Download, run, plug the Nano in. First-time Windows driver step: install the libusb-win32/WinUSB driver with Zadig (see README)." || \
+            --notes "Download, run, plug the Nano in. First-time Windows driver step: run SeekNanoDriverInstaller.exe (Device-Manager fallback described in app/README.md)." || \
             gh release upload "$TAG" "$EXE_FILE" SeekNano-driver.zip --repo "$GITHUB_REPOSITORY" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
