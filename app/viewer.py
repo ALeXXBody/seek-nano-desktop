@@ -232,6 +232,8 @@ class Viewer(wx.Frame):
         self.last_fid = None
         self.disp_prev = None      # temporal smoothing state
         self.nuc = None            # shutterless-NUC background reference
+        self.lo_ema = None
+        self.hi_ema = None
 
         panel = wx.Panel(self)
         top = wx.BoxSizer(wx.HORIZONTAL)
@@ -349,6 +351,10 @@ class Viewer(wx.Frame):
         raw, fid = decode_frame(self.frame_raw)
         self.last_fid = fid
         img_arr = raw[ROI_Y:ROI_Y + IMG_H, ROI_X:ROI_X + IMG_W].copy()
+        if fid != 1 and fid != 3:
+            self.last_fid = fid
+            self.q.put(("log", "calibration frame (id %d) skipped" % fid))
+            return None
         if fid == 1:
             self.ffc_bank.append(img_arr)
             if len(self.ffc_bank) > 8:
@@ -359,6 +365,8 @@ class Viewer(wx.Frame):
                 self.frame_ffc_saved = True
             except Exception:
                 pass
+            self.disp_prev = None
+            self.lo_ema = self.hi_ema = None
             self.q.put(("log", "FFC frame bank=%d averaged" % len(self.ffc_bank)))
             return None                # don't render the shutter frame itself
         if self.ffc is not None:
@@ -371,9 +379,15 @@ class Viewer(wx.Frame):
         if self.disp_prev is not None and self.ffc is not None:
             img_arr = 0.45 * self.disp_prev + 0.55 * img_arr
         self.disp_prev = img_arr.copy()
-        # adaptive contrast: robust percentile stretch + gamma
+        # adaptive contrast: smoothed percentile bounds (no pumping flicker)
         lo = float(np.percentile(img_arr, 5))
         hi = float(np.percentile(img_arr, 95))
+        if self.lo_ema is None:
+            self.lo_ema, self.hi_ema = lo, hi
+        else:
+            self.lo_ema = 0.85 * self.lo_ema + 0.15 * lo
+            self.hi_ema = 0.85 * self.hi_ema + 0.15 * hi
+        lo, hi = self.lo_ema, self.hi_ema
         t = np.clip((img_arr - lo) / max(1.0, hi - lo), 0, 1) ** 0.85
         rgb = COLORMAPS[self.lut_i][1](t).astype(np.uint8)
         img = wx.Image(IMG_W, IMG_H, rgb.tobytes())

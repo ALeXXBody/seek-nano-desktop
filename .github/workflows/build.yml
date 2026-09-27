@@ -23,6 +23,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pyusb numpy pyinstaller libusb-package wxPython
 
+      - name: build driver installer (csc)
+        shell: powershell
+        run: |
+          & C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /out:driver/SeekNanoDriverInstaller.exe /win32manifest:driver/admin.manifest driver/installer.cs
       - name: build exe
         run: |
           pyinstaller --onefile --windowed --name SeekNano `
@@ -32,11 +36,11 @@ jobs:
         shell: powershell
 
       - name: upload release
-        run: |
+        run: |        
           TAG="${GITHUB_REF_NAME}"
           case "$TAG" in v*) ;; *) TAG="v0.2.0-manual";; esac
           EXE_FILE=$(ls dist/*.exe | head -1)
-          7z a -tzip SeekNano-driver.zip ./driver/seeknano.inf ./driver/install.ps1 || echo "no 7z,skip"
+          Remove-Item driver/install.ps1 -ErrorAction SilentlyContinue; 7z a -tzip SeekNano-driver.zip ./driver/*
           gh release create "$TAG" "$EXE_FILE" SeekNano-driver.zip --repo "$GITHUB_REPOSITORY" \
             --title "Seek Nano Viewer $TAG" \
             --notes "Download, run, plug the Nano in. First-time Windows driver step: install the libusb-win32/WinUSB driver with Zadig (see README)." || \
