@@ -846,15 +846,39 @@ def dev_serve(target_url="192.168.50.200:8100", frames_per_batch=3):
     say("dev-serve target: %s:%d" % (host, port))
 
     # ---- native transport: WinUSB API on the MI_00 child (live stream) ----
-    try:
-        nt = NativeTransport()
-    except OSError as e:
-        say("dev: no native transport dll found next to SeekNano.exe (%r).\n"
-            "Download SeekNano.dlls.zip from the release and extract it "
-            "next to the exe (it carries seeknanousb.dll + "
-            "seeknanodirect.dll)." % e, True)
+    # prefer seeknanousb.dll (pure WinUSB API, GUID {1C2BD42A...} = MI_00,
+    # bulk ep 0x81): that is the transport that captured 177840-byte frames
+    # directly on this hardware.  seeknanodirect.dll (libusb) enumerates the
+    # composite and lands on the *silent* MI_01 half (stream_start rc=-30).
+    name = pfx = d = None
+    frozen_cand = []
+    base_dir = (sys._MEIPASS if getattr(sys, "frozen", False) and
+                hasattr(sys, "_MEIPASS") else
+                os.path.dirname(os.path.abspath(sys.executable)) if
+                getattr(sys, "frozen", False) else
+                os.path.dirname(os.path.abspath(__file__)))
+    for fn, pfx_ in (("seeknanousb.dll", "SN_"), ("seeknanodirect.dll", "SNLB_")):
+        for path in (os.path.join(base_dir, fn), fn):
+            try:
+                d_ = _ct.CDLL(path)
+                getattr(d_, pfx_ + "open").restype = _ct.c_int
+                getattr(d_, pfx_ + "stream_start").restype = _ct.c_int
+                getattr(d_, pfx_ + "get_frame").restype = _ct.c_int
+                getattr(d_, pfx_ + "get_frame").argtypes = [_ct.c_char_p]
+                getattr(d_, pfx_ + "stream_stop").restype = _ct.c_int
+                getattr(d_, pfx_ + "close").restype = None
+                name, pfx, d = fn, pfx_, d_
+                break
+            except Exception:
+                continue
+        if name is not None:
+            break
+    if name is None:
+        say("dev: no native transport dll found next to SeekNano.exe ({})\n"
+            "Download SeekNano-devbundle.zip from the release and extract "
+            "it next to the exe (seeknanousb.dll + seeknanodirect.dll)."
+            .format(base_dir), True)
         return
-    name, pfx, d = nt.k
     say("dev transport: " + name)
 
     if getattr(d, pfx + "open")() != 0:
