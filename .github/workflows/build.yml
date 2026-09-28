@@ -57,6 +57,10 @@ jobs:
         run: |
           python -c "import libusb_package, shutil, os; shutil.copy2(os.path.join(os.path.dirname(libusb_package.__file__), 'libusb-1.0.dll'), '.')"
           ls -la libusb-1.0.dll
+      - name: run dev-mode test harness
+        run: python tests/test_dev_mode.py
+        shell: bash
+
       - name: build exe
         run: |
           pyinstaller --onefile --windowed --name SeekNano `
