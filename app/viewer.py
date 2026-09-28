@@ -185,16 +185,22 @@ class NativeTransport:
     def __init__(self):
         self.k = None
         self.name = None
-        for name, pfx in (("seeknanodirect.dll", "SNLB_"), ("seeknanousb.dll", "SN_")):
+        # candidates: also check PyInstaller's bundle dir; for a windowed
+        # onefile build the dll is extracted to sys._MEIPASS, never the exe
+        # folder, so plain ctypes.CDLL("name.dll") fails there.
+        cand = ["seeknanodirect.dll", "seeknanousb.dll"]
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            cand = [os.path.join(sys._MEIPASS, n) for n in cand] + cand
+        for path, pfx in zip(cand, ["SNLB_", "SNLB_", "SN_", "SN_"]):
             try:
-                d = _ct.CDLL(name)
+                d = _ct.CDLL(path)
                 getattr(d, pfx + "open").restype = _ct.c_int
                 getattr(d, pfx + "stream_start").restype = _ct.c_int
                 getattr(d, pfx + "get_frame").restype = _ct.c_int
                 getattr(d, pfx + "get_frame").argtypes = [_ct.c_char_p]
                 getattr(d, pfx + "stream_stop").restype = _ct.c_int
                 getattr(d, pfx + "close").restype = None
-                self.k = (name, pfx, d)
+                self.k = (name := os.path.basename(path), pfx, d)
                 self.name = name
                 break
             except Exception:
@@ -819,38 +825,51 @@ def dev_serve(target_url="192.168.50.200:8100", frames_per_batch=3):
     being able to open the composite *parent* node (pyusb fails with
     "[Errno 13] Access denied" there, because usbccgp owns the parent).
     Frames are PUT to http://<host>:<port>/frame_<seq>.raw.
+    Log: devserve.log next to the exe (printf-safe, windowed build).
     """
     import ctypes
+    _box = ctypes.windll.user32.MessageBoxW
+    logf = open("devserve.log", "a", buffering=1)
+
+    def say(msg, fatal=False):
+        print(msg)
+        logf.write("%.3f %s\n" % (time.time(), msg) if not fatal else msg)
+        try:
+            logf.write("%.3f %s\n" % (time.time(), msg))
+        except Exception:
+            pass
+        if fatal:
+            _box(None, msg, "SeekNano dev", 0x10)
 
     host, port = parse_target(target_url)
     uploader = DevUploader(host, port)
-    print("dev-serve target: %s:%d" % (host, port))
-    try:
-        import libusb_package
-        libusb_package.get_libusb1_backend()
-    except Exception:
-        pass
+    say("dev-serve target: %s:%d" % (host, port))
 
     # ---- native transport: WinUSB API on the MI_00 child (live stream) ----
     try:
         nt = NativeTransport()
     except OSError as e:
-        print("dev: no native transport available (%r)." % e)
-        print("dev: install the driver once - run SeekNanoDriverInstaller.exe")
+        say("dev: no native transport dll found next to SeekNano.exe (%r).\n"
+            "Download SeekNano.dlls.zip from the release and extract it "
+            "next to the exe (it carries seeknanousb.dll + "
+            "seeknanodirect.dll)." % e, True)
         return
     name, pfx, d = nt.k
-    print("dev transport: " + name)
+    say("dev transport: " + name)
 
     if getattr(d, pfx + "open")() != 0:
-        print("native open failed - make sure SeekNanoDriverInstaller was "
-              "run once and both child interfaces are bound to WinUSB.")
-        print(dev_bindinfo())
+        say("dev: native open failed.\n\n"
+            "Make sure both child interfaces are bound to WinUSB "
+            "(run bind.ps1 once, or SeekNanoDriverInstaller).\n\n"
+            "Details: devserve.log, bindinfo.txt.", True)
+        try:
+            open("bindinfo.txt", "w", encoding="utf-8").write(dev_bindinfo())
+        except Exception:
+            pass
         return
 
     rc = getattr(d, pfx + "stream_start")()
-    print("stream_start rc=%d" % rc)
-
-    print(dev_bindinfo())
+    say("stream_start rc=%d" % rc)
 
     buf = ctypes.create_string_buffer(FRAME_BYTES)
     seq = 0
@@ -859,14 +878,14 @@ def dev_serve(target_url="192.168.50.200:8100", frames_per_batch=3):
     last_ok = time.time()
     get_frame = getattr(d, pfx + "get_frame")
     stream_stop = getattr(d, pfx + "stream_stop")
+    say("streaming; frames PUT to %s:%d" % (host, port))
     while True:
         n = get_frame(buf)
         if n != FRAME_BYTES:
             fails_total += 1
-            print("frame attempt %d got %s bytes (fails=%d)" %
-                  (seq + 1, n, fails_total))
+            say("frame attempt got %s bytes (fails=%d)" % (n, fails_total))
             if fails_total > 12:
-                print("dev: native pump stalled - rerun the exe, or unplug/replug")
+                say("dev: native pump stalled - rerun, or unplug/replug.")
                 stream_stop()
                 return
             time.sleep(0.2)
@@ -875,14 +894,13 @@ def dev_serve(target_url="192.168.50.200:8100", frames_per_batch=3):
         batch += 1
         ok, _ = uploader.put_frame(bytes(buf.raw))
         dt = (time.time() - last_ok) * 1000.0
-        print("frame %d ok  %4.0f ms  upload=%s" %
-              (seq, dt, "ok" if ok else "FAILED"))
+        say("frame %d ok  %4.0f ms  upload=%s" %
+            (seq, dt, "ok" if ok else "FAILED"))
         fails_total = 0
         last_ok = time.time()
         if batch >= frames_per_batch:
             batch = 0
             time.sleep(0.5)
-    # unreachable: stream_stop() in the loop above on stall
 
 
 def dev_bind():
