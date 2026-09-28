@@ -4,7 +4,28 @@ Project goal: reverse-engineer the **Seek Nano** (USB-C thermal camera, phone-on
 design) and build a **desktop PC viewer/driver** so the camera can be used directly on a
 computer (Linux/Windows).
 
-Status: **in progress** — APK intelligence gathering complete, dynamic trace pending.
+## Dev build extras (until stable)
+
+These are development-only hooks; the plan is to drop them once the stream path is
+proven stable.
+
+* **`--dev-serve [host[:port]]`** — headless frame collector. Opens the camera, walks
+  *all* bulk-in endpoints of both composite children (`MI_00`/`0x81` and
+  `MI_01`/`0x82`), streams every captured frame to a collector over plain HTTP PUT
+  (`http://host:port/frame_NNNN.raw`). Replaces the earlier `bind.ps1` +
+  `loop.ps1` + `curl.exe` chain with a single double-click: nothing else is
+  needed on the camera box.
+* **`--dev-bind`** — print the PnP binding state of every Seek node to
+  `bindinfo.txt` (replaces `diag.cmd`).
+* **GUI dev row** — `dev: upload frames` + host field + `dev: retry endpoints`
+  + `dev: bind info`. Frames captured while the checkbox is on are POSTed to
+  the TrueNAS dev host (default `192.168.50.200:8100`) over plain HTTP.
+* **Endpoint auto-probe** — the bulk stream no longer assumes the first listed
+  endpoint; it walks the candidate list (`0x81` then `0x82`) and switches to
+  whichever one is actually streaming. Direct capture on the camera host
+  confirmed the thermal stream on `MI_00`/`0x81`; `MI_01`/`0x82` is silent.
+
+## Status: **in progress** — APK intelligence gathering complete, dynamic trace pending.
 
 ---
 

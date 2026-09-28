@@ -40,6 +40,103 @@ CHUNK = 6_840
 W, H = 320, 240
 VW, VH = W * 2, H * 2
 
+# ============================================================================
+# --- DEV: endpoint knowledge from the 2026-10-02 capture campaign -----------
+#   USB\VID_289D&PID_0011\serial     parent      usbccgp
+#   USB\VID_289D&PID_0011&MI_00\...  iAP Interface  (alt 0: 0x01 OUT / 0x81 IN)
+#   USB\VID_289D&PID_0011&MI_01\...  com.thermal.pir324.3 (alt 0: empty,
+#                                    alt 1: 0x02 OUT / 0x82 IN)
+# Direct capture on the camera host showed the *thermal stream on MI_00/0x81*
+# (~63 ms per frame). MI_01/0x82 is silent, MI_01 binds it at alt 1 because
+# the composite parent gives interface 1 two bulk pipes that only appear
+# there. For a dev build we therefore try every bulk-in endpoint we can see,
+# in a deterministic order, and prefer whichever one actually produces data.
+# ============================================================================
+EP_CANDIDATES = (0x81, 0x82)   # iface 0 alt 0 first, iface 1 alt 1 second
+
+
+# ----------------------------------------------------------------------------
+# --- DEV: HTTP frame uploader (replaces loop.ps1 / sncap.exe) ----------------
+class DevUploader:
+    """PUTs captured frames to a dev host over plain HTTP.
+
+    Keep this until the stream path is stable; it is a one-file replacement
+    for the sncap.exe + loop.ps1 + loop.cmd + bind.ps1 experiment kit and is
+    clearly segregated so it can be yanked for the stable release.
+    """
+
+    def __init__(self, host, port=8100):
+        # host may be "192.168.50.200" or "192.168.50.200:8100"
+        if ":" in host:
+            parts = host.split(":")
+            self.host, self.port = parts[0], int(parts[1])
+        else:
+            self.host, self.port = host, port
+        self.seq = 0
+        self.last_ok = False
+
+    @property
+    def base(self):
+        return "http://{}:{}".format(self.host, self.port)
+
+    def put_frame(self, blob, label=None):
+        self.seq += 1
+        name = label or "frame_{0:04d}.raw".format(self.seq)
+        blob_to_send = blob
+        return self._put(name, blob_to_send), name
+
+    def put_logs(self, text):
+        return self._put("logs.txt", text.encode("utf-8", "replace"))
+
+    def put_bindinfo(self, text):
+        return self._put("bindinfo.txt", text.encode("utf-8", "replace"))
+
+    def _put(self, name, blob):
+        import http.client
+        try:
+            c = http.client.HTTPConnection(self.host, self.port, timeout=15)
+            c.request("PUT", "/" + name, blob,
+                      {"Content-Type": "application/octet-stream"})
+            r = c.getresponse()
+            r.read()
+            c.close()
+            self.last_ok = (r.status == 200)
+            return self.last_ok
+        except Exception as e:
+            print("dev upload failed: %r" % e)
+            self.last_ok = False
+            return False
+
+
+# --- DEV: PnP bind-state probe (replaces diag.cmd) ---------------------------
+def dev_bindinfo():
+    """Return a text report of the PnP binding state of every Seek node.
+
+    Wraps Get-PnpDevice so no helper .ps1/.cmd files are needed on the box.
+    """
+    import subprocess
+    ps = (
+        "Get-PnpDevice -PresentOnly | "
+        "Where-Object { $_.InstanceId -match 'VID_289D' } | "
+        "ForEach-Object { "
+        "  $svc = (Get-PnpDeviceProperty -InstanceId $_.InstanceId "
+        "-KeyName DEVPKEY_Device_Service).Data; "
+        "  '{0,-30} {1,-26} svc={2}' -f $_.FriendlyName, $_.InstanceId, $svc "
+        "}"
+    )
+    out = ["--- PnP binding state (Get-PnpDevice) ---"]
+    try:
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True, text=True, timeout=30)
+        out += (res.stdout or "").splitlines()
+        if res.returncode != 0 and res.stderr:
+            out += ["stderr: " + l for l in res.stderr.splitlines()[:4]]
+    except Exception as e:
+        out.append("bindinfo probe failed: %r" % e)
+    out.append("--- dev: end ---")
+    return "\n".join(l.rstrip() for l in out if l.strip())
+
 
 def ironbow(t):
     r = np.clip(255.0 * (1.4 * t - 0.2), 0, 255)
@@ -169,10 +266,12 @@ class NativeStream(threading.Thread):
 
 
 class Stream(threading.Thread):
-    def __init__(self, q, status_cb=None):
+    def __init__(self, q, status_cb=None, upload_target=None, upload_port=None):
         super().__init__(daemon=True)
         self.q = q
         self.status_cb = status_cb
+        self.upload_target = upload_target
+        self.upload_port = upload_port
         self.stop_flag = threading.Event()
         try:
             self.logf = open("seeknano_verbose.log", "a", buffering=1)
@@ -239,13 +338,28 @@ class Stream(threading.Thread):
             self.q.put(("status", "streaming mode enabled - pumping frames"))
 
             if eps:
-                self.ep_i = 0
-                iface_n, ep_addr = eps[self.ep_i]
-                self.put(("log", "using iface %d ep %#x" % (iface_n, ep_addr)))
+                # --- DEV: walk the candidate endpoints and remember the
+                # ones that actually carry data instead of assuming the
+                # first one (MI_00/0x81 wins on this hardware, see header).
+                order = [ep for (_i, ep) in eps
+                         if ep in EP_CANDIDATES] or [ep for (_i, ep) in eps]
+                self.ep_order = order
+                self.put(("log", "bulk-in candidates: " +
+                          ", ".join("0x%02x" % e for e in order)))
             else:
-                iface_n, ep_addr = 0, BULK_EP
+                self.ep_order = [BULK_EP]
+            self.ep_i = 0
+            iface_n, ep_addr = 0, self.ep_order[0]
+            self.put(("log", "starting with ep 0x%02x" % ep_addr))
+            dev_uploader = None
+            if getattr(self, "upload_target", None):
+                host = self.upload_target
+                port = int(self.upload_port) if self.upload_port else 8100
+                dev_uploader = DevUploader(host, port)
+                self.put(("log", "dev upload -> %s:%d" % (host, port)))
             kicks = 0
             fails = 0
+            exchanged = 0
             period = 0.040            # start optimistic: try the 25 fps spec
             MIN_PERIOD, MAX_PERIOD = 0.040, 0.115
             last_ok = time.time()
@@ -267,9 +381,26 @@ class Stream(threading.Thread):
                         if kicks % 12 == 0:
                             self.put(("log", "pacing %.0f ms (dt %.0f ms) ~ %.1fkicks/s" % (period*1000, dt*1000, 1.0/period)))
                     fails = 0
+                    if dev_uploader:
+                        try:
+                            ok, name = dev_uploader.put_frame(bytes(buf))
+                            exchanged += ok
+                            self.put(("log", "dev upload %s -> %s" %
+                                      (name, "ok" if ok else "FAILED")))
+                        except Exception as ue:
+                            self.put(("log", "dev upload error: %r" % ue))
                 except usb.core.USBError as ue:
                     fails += 1
                     self.trace("BULK FAIL %s (fails=%d): %s" % (type(ue).__name__, fails, ue))
+                    if fails == 2 and len(self.ep_order) > 1:
+                        # advance to the next candidate - MI_01/0x82 is
+                        # silent on this hardware so keep going until we
+                        # find the live endpoint rather than waiting for
+                        # a full reset round
+                        self.ep_i = (self.ep_i + 1) % len(self.ep_order)
+                        ep_addr = self.ep_order[self.ep_i]
+                        fails = 0
+                        self.put(("log", "dev: switching to endpoint 0x%02x" % ep_addr))
                     if fails == 3:
                         self.put(("log", "stalled - resetting mode, pacing %.0f ms" % (period*1000)))
                         try:
@@ -342,6 +473,21 @@ class Viewer(wx.Frame):
         for b in (self.start_btn, self.cmap_btn, snap_btn, raw_btn, copy_btn, clear_btn):
             top.Add(b, 0, wx.ALL, 3)
 
+        # --------------------------------------------------------------------
+        # --- DEV row: frame upload to a dev host + endpoint / bind probes --
+        # Internal to the development flow, removed for the stable build.
+        self.dev_host = wx.TextCtrl(panel, value="192.168.50.200:8100",
+                                    style=wx.TE_PROCESS_ENTER)
+        self.dev_upload = wx.CheckBox(panel, label="dev: upload frames")
+        self.dev_probe = wx.Button(panel, label="dev: retry endpoints")
+        self.dev_bind = wx.Button(panel, label="dev: bind info")
+        self.dev_upload.SetValue(False)
+        self.dev_probe.Bind(wx.EVT_BUTTON, self.on_dev_probe)
+        self.dev_bind.Bind(wx.EVT_BUTTON, self.on_dev_bind)
+        for b in (self.dev_host, self.dev_upload, self.dev_probe, self.dev_bind):
+            top.Add(b, 0, wx.ALL, 3)
+        # --------------------------------------------------------------------
+
         split = wx.SplitterWindow(panel, style=wx.SP_LIVE_UPDATE)
         self.video = wx.Panel(split, style=wx.BORDER_SUNKEN)
         self.video.SetBackgroundColour(wx.BLACK)
@@ -376,10 +522,27 @@ class Viewer(wx.Frame):
             return
         self.frame_raw = None
         self.push_status("starting ...")
-        if _ctdll is not None:
+        upload_target = None
+        upload_port = None
+        if self.dev_upload.GetValue():
+            raw = self.dev_host.GetValue().strip()
+            if ":" in raw:
+                upload_target, upload_port = raw.rsplit(":", 1)
+            else:
+                upload_target = raw
+            self.q.put(("log", "dev: frames will POST to %s:%s" %
+                        (upload_target, upload_port)))
+        # DEV: when frame upload is on, prefer the pyusb stream so the
+        # endpoint auto-probe and uploader are in the same loop, even if
+        # the native dlls are present
+        if self.dev_upload.GetValue() and upload_target:
+            self.stream_thread = Stream(self.q, upload_target=upload_target,
+                                        upload_port=upload_port)
+        elif _ctdll is not None:
             self.stream_thread = NativeStream(self.q)
         else:
-            self.stream_thread = Stream(self.q)
+            self.stream_thread = Stream(self.q, upload_target=upload_target,
+                                        upload_port=upload_port)
         self.stream_thread.start()
         self.start_btn.SetLabel("Stop stream")
 
@@ -410,6 +573,26 @@ class Viewer(wx.Frame):
             self.q.put(("log", "-> copied to clipboard"))
         else:
             self.q.put(("log", "-> clipboard unavaiable"))
+
+    # ------------------------------------------------------------------
+    # --- DEV handlers --------------------------------------------------
+    def on_dev_probe(self, ev):
+        """force the next Start to walk the endpoint candidates again"""
+        if self.stream_thread and self.stream_thread.is_alive():
+            self.stream_thread.stop_flag.set()
+            self.stream_thread = None
+        self.start_btn.SetLabel("Start stream")
+        self.push_status("dev: stopped, will auto-probe endpoints on Start")
+        self.q.put(("log", "dev: restart the stream to re-probe endpoints"))
+
+    def on_dev_bind(self, ev):
+        text = dev_bindinfo()
+        self.q.put(("log", text))
+        name = "bindinfo.txt"
+        open(name, "w", encoding="utf-8").write(text)
+        self.q.put(("log", "saved " + name))
+
+    # ------------------------------------------------------------------
 
     def on_clear(self, ev):
         self.log.Clear()
@@ -616,6 +799,128 @@ def _crashlog(fn, *a):
         import ctypes
         ctypes.windll.user32.MessageBoxW(None, "crash.txt written next to the exe", "SeekNano", 0x10)
 
+
+def parse_target(s, default_port=8100):
+    "192.168.50.200[:8100] -> (ip, port)"
+    if ":" in s:
+        host, port = s.rsplit(":", 1)
+        return host, int(port)
+    return s, default_port
+
+
+# ---------------------------------------------------------------------------
+# --- DEV: headless frame collector, replaces loop.ps1 entirely --------------
+def dev_serve(target_url="192.168.50.200:8100", frames_per_batch=3):
+    """Dev headless capture: stream raw frames to a collector over HTTP PUT.
+
+    Usage:  SeekNano.exe --dev-serve [host[:port]]
+
+    Designed for the work-in-progress branch so the user has One Double-Click
+    instead of bind.ps1 + loop.ps1 + diag.cmd + sncap.exe, replacing the
+    ad-hoc script set with a single dev workflow that lives inside the app.
+    Frames are PUT to  http://<host>:<port>/frame_<seq>.raw.
+    """
+    import usb.core, usb.util
+
+    host, port = parse_target(target_url)
+    uploader = DevUploader(host, port)
+    print("dev-serve target: %s:%d" % (host, port))
+
+    def ctrl_out(request, payload):
+        print("W req=0x%02x data=%s" % (request, payload.hex()))
+        dev.ctrl_transfer(REQ_OUT, request, 0, 0, payload, 1250)
+        print("W req=0x%02x OK" % request)
+
+    def ctrl_in(request, length):
+        r = bytes(dev.ctrl_transfer(REQ_IN, request, 0, 0, length, 1250))
+        print("R req=0x%02x len=%d -> %s" % (request, length, r.hex()))
+        return r
+
+    try:
+        import libusb_package
+        backend_ = libusb_package.get_libusb1_backend()
+    except Exception:
+        backend_ = None
+
+    dev = usb.core.find(idVendor=VID, idProduct=PID, backend=backend_)
+    if dev is None:
+        print("camera not found (vid 0x289d pid 0x11)")
+        return
+    dev.set_configuration()
+    print("camera open.")
+
+    # enumerate every bulk-in endpoint across all child interfaces so the dev
+    # mode does the same auto-probe the GUI stream does
+    candidates = []
+    try:
+        for cfg in dev:
+            for iface in cfg:
+                for ep in iface:
+                    if (ep.bEndpointAddress & 0x80) and (ep.bmAttributes & 3) == 2:
+                        candidates.append(ep.bEndpointAddress)
+        candidates = [e for e in candidates if e in EP_CANDIDATES] or candidates
+    except Exception as e:
+        print("iface walk failed: %r" % e)
+    print("bulk-in candidates: " + ", ".join("0x%02x" % e for e in candidates))
+    if not candidates:
+        candidates = [BULK_EP]
+    print(dev_bindinfo())
+
+    # phase 1 handshake, same as the GUI stream
+    ctrl_out(0x54, b"\x00\x00")
+    ctrl_out(0x3c, b"\x00\x00")
+    ctrl_in(0x3d, 2)
+    ctrl_out(0x3e, b"\x08\x00")
+    ctrl_out(0x37, b"\xfc\x00\x04\x00")
+    ctrl_out(0x3c, b"\x01\x00")
+    ctrl_in(0x3d, 2)
+    print("streaming armed; uploading to %s:%d" % (host, port))
+
+    seq = 0
+    ep_i = 0
+    batch = 0
+    fails_total = 0
+    last_ok = time.time()
+    working_ep = candidates[0]
+    while True:
+        ep = candidates[ep_i % len(candidates)]
+        try:
+            ctrl_out(0x53, b"\x58\x5b\x01\x00")
+            buf = bytearray()
+            while len(buf) < FRAME_BYTES:
+                buf.extend(dev.read(ep, CHUNK, 500))
+            if len(buf) != FRAME_BYTES:
+                print("short frame %d B on ep 0x%02x" % (len(buf), ep))
+                ep_i += 1                       # move to the next candidate
+                continue
+            seq += 1
+            batch += 1
+            ok, _ = uploader.put_frame(bytes(buf))
+            dt = (time.time() - last_ok) * 1000.0
+            print("frame %d ok ep 0x%02x  %4.0f ms  upload=%s" %
+                  (seq, ep, dt, "ok" if ok else "FAILED"))
+            fails_total = 0
+            last_ok = time.time()
+            if batch >= frames_per_batch:
+                batch = 0
+                time.sleep(0.5)
+        except usb.core.USBError as e:
+            print("bulk fail on ep 0x%02x: %r" % (ep, e))
+            ep_i += 1
+            fails_total += 1
+            if fails_total > 40:
+                print("dev: giving up - restart the exe to re-probe")
+                return
+            time.sleep(0.2)
+
+
+def dev_bind():
+    """Print the PnP binding state (replaces diag.cmd binds)."""
+    print(dev_bindinfo())
+    open("bindinfo.txt", "w", encoding="utf-8").write(dev_bindinfo())
+    print("saved bindinfo.txt")
+
+
 def selftest():
     results = []
     for modstr in ("wx", "numpy", "queue", "PIL"):
@@ -653,6 +958,18 @@ def _run_gui():
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
         selftest()
+    elif "--dev-serve" in sys.argv:
+        # dev: python viewer.py --dev-serve 192.168.50.200:8100 [frames_per_batch]
+        target = "192.168.50.200:8100"
+        fps = 3
+        argv = sys.argv[sys.argv.index("--dev-serve") + 1:]
+        if argv:
+            target = argv[0]
+        if len(argv) > 1 and argv[1].isdigit():
+            fps = int(argv[1])
+        _crashlog(dev_serve, target, fps)
+    elif "--dev-bind" in sys.argv:
+        dev_bind()
     elif "--serve" in sys.argv:
         port = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 5005
         _crashlog(serve_mode, port)
