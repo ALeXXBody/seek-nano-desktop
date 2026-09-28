@@ -815,129 +815,74 @@ def dev_serve(target_url="192.168.50.200:8100", frames_per_batch=3):
 
     Usage:  SeekNano.exe --dev-serve [host[:port]]
 
-    Same endpoint auto-probe the GUI stream uses: walks every child interface
-    of the composite (MI_00 *and* MI_01) and claims them, switching interface 1
-    to alternate setting 1 so its bulk pipe is exposed.  A raw "read 0x82"
-    without that switch trips KeyError 130 -> "Invalid endpoint address".
+    Uses the native WinUSB transport dll so the run does not depend on libusb
+    being able to open the composite *parent* node (pyusb fails with
+    "[Errno 13] Access denied" there, because usbccgp owns the parent).
     Frames are PUT to http://<host>:<port>/frame_<seq>.raw.
     """
-    import usb.core, usb.util
+    import ctypes
 
     host, port = parse_target(target_url)
     uploader = DevUploader(host, port)
     print("dev-serve target: %s:%d" % (host, port))
-
-    def ctrl_out(request, payload):
-        print("W req=0x%02x data=%s" % (request, payload.hex()))
-        dev.ctrl_transfer(REQ_OUT, request, 0, 0, payload, 1250)
-        print("W req=0x%02x OK" % request)
-
-    def ctrl_in(request, length):
-        r = bytes(dev.ctrl_transfer(REQ_IN, request, 0, 0, length, 1250))
-        print("R req=0x%02x len=%d -> %s" % (request, length, r.hex()))
-        return r
-
     try:
         import libusb_package
-        backend_ = libusb_package.get_libusb1_backend()
-    except Exception:
-        backend_ = None
-
-    dev = usb.core.find(idVendor=VID, idProduct=PID, backend=backend_)
-    if dev is None:
-        print("camera not found (vid 0x289d pid 0x11)")
-        return
-    dev.set_configuration()
-    # claim both children so reads on either are permitted by the composite
-    usb.util.claim_interface(dev, 0)
-    try:
-        usb.util.claim_interface(dev, 1)
+        libusb_package.get_libusb1_backend()
     except Exception:
         pass
 
-    # interface 1 only exposes its pipes on alternate setting 1; switch there
-    # once so the endpoint objects resolve for the rest of the run.
+    # ---- native transport: WinUSB API on the MI_00 child (live stream) ----
     try:
-        dev.set_interface_altsetting(1, 1)
-        print("interface 1 alt-setting 1 active (0x82 pipe exposed)")
-    except usb.core.USBError as e:
-        print("alt-setting switch on iface 1 failed: %r" % e)
-    print("camera open.")
-
-    def endpoint_for(addr):
-        """Resolve endpoint address -> Endpoint object, per interface."""
-        cfg = dev.get_active_configuration()
-        iface_no = 1 if addr == 0x82 else 0
-        itf = usb.util.find_descriptor(cfg, bInterfaceNumber=iface_no)
-        ep = usb.util.find_descriptor(itf, bEndpointAddress=addr)
-        if ep is None:
-            raise ValueError("endpoint 0x%02x not exposed on iface %d" %
-                             (addr, iface_no))
-        return ep
-
-    # candidate order: MI_00/0x81 carries the thermal stream, so try it first
-    candidates = list(EP_CANDIDATES)
-    print("bulk-in candidates: " + ", ".join("0x%02x" % e for e in candidates))
-    endpoints = {}
-    for addr in candidates:
-        try:
-            endpoints[addr] = endpoint_for(addr)
-        except Exception as e:
-            print("endpoint 0x%02x unavailable: %r" % (addr, e))
-    if not endpoints:
-        print("dev: no reachable bulk-in endpoint - rerun --dev-bind and rebind")
+        nt = NativeTransport()
+    except OSError as e:
+        print("dev: no native transport available (%r)." % e)
+        print("dev: install the driver once - run SeekNanoDriverInstaller.exe")
         return
+    name, pfx, d = nt.k
+    print("dev transport: " + name)
+
+    if getattr(d, pfx + "open")() != 0:
+        print("native open failed - make sure SeekNanoDriverInstaller was "
+              "run once and both child interfaces are bound to WinUSB.")
+        print(dev_bindinfo())
+        return
+
+    rc = getattr(d, pfx + "stream_start")()
+    print("stream_start rc=%d" % rc)
+
     print(dev_bindinfo())
 
-    # phase 1 handshake, same as the GUI stream
-    ctrl_out(0x54, b"\x00\x00")
-    ctrl_out(0x3c, b"\x00\x00")
-    ctrl_in(0x3d, 2)
-    ctrl_out(0x3e, b"\x08\x00")
-    ctrl_out(0x37, b"\xfc\x00\x04\x00")
-    ctrl_out(0x3c, b"\x01\x00")
-    ctrl_in(0x3d, 2)
-    print("streaming armed; frames PUT to %s:%d" % (host, port))
-
+    buf = ctypes.create_string_buffer(FRAME_BYTES)
     seq = 0
-    ep_i = 0
     batch = 0
     fails_total = 0
     last_ok = time.time()
+    get_frame = getattr(d, pfx + "get_frame")
+    stream_stop = getattr(d, pfx + "stream_stop")
     while True:
-        ep_addr = candidates[ep_i % len(candidates)]
-        ep = endpoints.get(ep_addr)
-        if ep is None:
-            ep_i += 1
-            continue
-        try:
-            ctrl_out(0x53, b"\x58\x5b\x01\x00")
-            buf = bytearray()
-            while len(buf) < FRAME_BYTES:
-                buf.extend(dev.read(ep, CHUNK, 500))
-            if len(buf) != FRAME_BYTES:
-                print("short frame %d B on ep 0x%02x" % (len(buf), ep_addr))
-                ep_i += 1
-                continue
-            seq += 1
-            batch += 1
-            ok, _ = uploader.put_frame(bytes(buf))
-            dt = (time.time() - last_ok) * 1000.0
-            print("frame %d ok ep 0x%02x  %4.0f ms  upload=%s" %
-                  (seq, ep_addr, dt, "ok" if ok else "FAILED"))
-            fails_total = 0
-            last_ok = time.time()
-            if batch >= frames_per_batch:
-                batch = 0
-                time.sleep(0.5)
-        except usb.core.USBError as e:
-            print("bulk fail on ep 0x%02x: %r" % (ep_addr, e))
-            ep_i += 1
+        n = get_frame(buf)
+        if n != FRAME_BYTES:
             fails_total += 1
-            if fails_total > 40:
-                print("dev: giving up - rerun the exe to re-probe")
+            print("frame attempt %d got %s bytes (fails=%d)" %
+                  (seq + 1, n, fails_total))
+            if fails_total > 12:
+                print("dev: native pump stalled - rerun the exe, or unplug/replug")
+                stream_stop()
                 return
             time.sleep(0.2)
+            continue
+        seq += 1
+        batch += 1
+        ok, _ = uploader.put_frame(bytes(buf.raw))
+        dt = (time.time() - last_ok) * 1000.0
+        print("frame %d ok  %4.0f ms  upload=%s" %
+              (seq, dt, "ok" if ok else "FAILED"))
+        fails_total = 0
+        last_ok = time.time()
+        if batch >= frames_per_batch:
+            batch = 0
+            time.sleep(0.5)
+    # unreachable: stream_stop() in the loop above on stall
 
 
 def dev_bind():
