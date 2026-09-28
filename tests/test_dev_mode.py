@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 import types
+import http.server
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 import stubs as W
@@ -71,18 +72,41 @@ check("parse_target default port", (host, port) == ("192.168.50.200", 8100),
       repr((host, port)))
 
 # --------------------------------------------------------------- DevUploader
-up = viewer.DevUploader("127.0.0.1", 8100)
-check("DevUploader base", up.base == "http://127.0.0.1:8100", up.base)
+# spin up a THROWAWAY receiver on a free localhost port - nothing external
+class _Receiver(http.server.BaseHTTPRequestHandler):
+    shares = {}
+    def do_PUT(self):
+        name = os.path.basename(self.path)
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
+        _Receiver.shares[name] = body
+        self.send_response(200)
+        self.send_header("Content-Length", "2")
+        self.end_headers()
+        self.wfile.write(b"ok")
+    def log_message(self, *a, **kw):
+        pass
 
-# real PUT against the running uploadsrv (local, no net dependency)
+with open(os.devnull, "a") as devnull:
+    for _port in range(8300, 8400):
+        try:
+            srv = http.server.ThreadingHTTPServer(("127.0.0.1", _port), _Receiver)
+            break
+        except OSError:
+            continue
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+
+up = viewer.DevUploader("127.0.0.1", srv.server_address[1])
+check("DevUploader base", up.base.startswith("http://127.0.0.1:"), up.base)
+
 fake = W.make_frame_body(seq=7)
 ok, name = up.put_frame(fake)
+srv.shutdown()
+received = _Receiver.shares.get(name, b"")
 check("DevUploader.put_frame ok", ok, "PUT returned non-200")
-
-blob = open("/root/snshare/" + name, "rb").read() \
-    if os.path.exists("/root/snshare/" + name) else b""
-check("frame landed on host (" + name + ")", len(blob) == len(fake),
-      "hosted=%d expected=%d" % (len(blob), len(fake)))
+check("frame arrived at receiver (" + name + ")",
+      len(received) == len(fake),
+      "hosted=%d expected=%d" % (len(received), len(fake)))
 
 # --------------------------------------------------- NativeTransport _MEIPASS
 import ctypes
@@ -120,18 +144,13 @@ try:
 except Exception as e:
     check("Stream.run clean stop", False, repr(e))
 
-# ------------------------------------------- synthetic frame decodes in snview
-sys.path.insert(0, "/root/snkit")
-import importlib.util as ilu
-sv = ilu.spec_from_file_location("snview", "/root/snkit/snview.py")
-snv = importlib.util.module_from_spec(sv)
+# --------------------------------- synthetic 177840-byte frame decode check
 try:
-    sv.loader.exec_module(snv)
     frame = W.make_frame_body(seq=3)
     import struct as _st
+    check("synthetic frame size", len(frame) == 177840, str(len(frame)))
+    check("synthetic frame header", frame[:2] == b"\x79\x05", frame[:2].hex())
     vals = list(_st.unpack("<%dH" % (177840 // 2), frame[:177840]))
-    rows = [sum(vals[y * 342:(y + 1) * 342]) / 342 for y in range(260)]
-    row_sd = (sum((m - sum(rows) / 260) ** 2 for m in rows) / 260) ** 0.5
     lo, hi = min(vals), max(vals)
     uniq = len(set(vals))
     rows = [sum(vals[y * 342:(y + 1) * 342]) / 342 for y in range(260)]
@@ -139,7 +158,7 @@ try:
     check("synthetic frame decodes (uniq>, sd>0)", uniq > 128 and row_sd > 4,
           "uniq=%d row_sd=%.1f" % (uniq, row_sd))
 except Exception as e:
-    check("snview decode", False, repr(e))
+    check("synthetic frame decode", False, repr(e))
 
 print()
 if failures:

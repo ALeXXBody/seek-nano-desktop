@@ -17,7 +17,8 @@ def make_frame_body(seq=1):
     prof = np.clip(0x4000 + 2000.0 * (yy / 259.0) + np.sin(np.arange(342) / 12.0) * 600,
                    0, 0xFFFF)
     vals[:] = prof.ravel().astype(np.uint16)
-    raw[16:16 + len(vals.tobytes())] = vals.tobytes()
+    payload = vals.tobytes()[:177840 - 16]   # header + payload == 177840
+    raw[16:16 + len(payload)] = payload
     return bytes(raw)
 
 
