@@ -815,10 +815,11 @@ def dev_serve(target_url="192.168.50.200:8100", frames_per_batch=3):
 
     Usage:  SeekNano.exe --dev-serve [host[:port]]
 
-    Designed for the work-in-progress branch so the user has One Double-Click
-    instead of bind.ps1 + loop.ps1 + diag.cmd + sncap.exe, replacing the
-    ad-hoc script set with a single dev workflow that lives inside the app.
-    Frames are PUT to  http://<host>:<port>/frame_<seq>.raw.
+    Same endpoint auto-probe the GUI stream uses: walks every child interface
+    of the composite (MI_00 *and* MI_01) and claims them, switching interface 1
+    to alternate setting 1 so its bulk pipe is exposed.  A raw "read 0x82"
+    without that switch trips KeyError 130 -> "Invalid endpoint address".
+    Frames are PUT to http://<host>:<port>/frame_<seq>.raw.
     """
     import usb.core, usb.util
 
@@ -847,23 +848,45 @@ def dev_serve(target_url="192.168.50.200:8100", frames_per_batch=3):
         print("camera not found (vid 0x289d pid 0x11)")
         return
     dev.set_configuration()
+    # claim both children so reads on either are permitted by the composite
+    usb.util.claim_interface(dev, 0)
+    try:
+        usb.util.claim_interface(dev, 1)
+    except Exception:
+        pass
+
+    # interface 1 only exposes its pipes on alternate setting 1; switch there
+    # once so the endpoint objects resolve for the rest of the run.
+    try:
+        dev.set_interface_altsetting(1, 1)
+        print("interface 1 alt-setting 1 active (0x82 pipe exposed)")
+    except usb.core.USBError as e:
+        print("alt-setting switch on iface 1 failed: %r" % e)
     print("camera open.")
 
-    # enumerate every bulk-in endpoint across all child interfaces so the dev
-    # mode does the same auto-probe the GUI stream does
-    candidates = []
-    try:
-        for cfg in dev:
-            for iface in cfg:
-                for ep in iface:
-                    if (ep.bEndpointAddress & 0x80) and (ep.bmAttributes & 3) == 2:
-                        candidates.append(ep.bEndpointAddress)
-        candidates = [e for e in candidates if e in EP_CANDIDATES] or candidates
-    except Exception as e:
-        print("iface walk failed: %r" % e)
+    def endpoint_for(addr):
+        """Resolve endpoint address -> Endpoint object, per interface."""
+        cfg = dev.get_active_configuration()
+        iface_no = 1 if addr == 0x82 else 0
+        itf = usb.util.find_descriptor(cfg, bInterfaceNumber=iface_no)
+        ep = usb.util.find_descriptor(itf, bEndpointAddress=addr)
+        if ep is None:
+            raise ValueError("endpoint 0x%02x not exposed on iface %d" %
+                             (addr, iface_no))
+        return ep
+
+    # candidate order: MI_00/0x81 carries the thermal stream, so try it first
+    candidates = list(EP_CANDIDATES)
     print("bulk-in candidates: " + ", ".join("0x%02x" % e for e in candidates))
-    if not candidates:
-        candidates = [BULK_EP]
+    endpoints = {}
+    for addr in candidates:
+        try:
+            endpoints[addr] = endpoint_for(addr)
+        except Exception as e:
+            print("endpoint 0x%02x unavailable: %r" % (addr, e))
+    if not endpoints:
+        print("dev: no reachable bulk-in endpoint - rerun --dev-bind and rebind")
+        return
     print(dev_bindinfo())
 
     # phase 1 handshake, same as the GUI stream
@@ -874,42 +897,45 @@ def dev_serve(target_url="192.168.50.200:8100", frames_per_batch=3):
     ctrl_out(0x37, b"\xfc\x00\x04\x00")
     ctrl_out(0x3c, b"\x01\x00")
     ctrl_in(0x3d, 2)
-    print("streaming armed; uploading to %s:%d" % (host, port))
+    print("streaming armed; frames PUT to %s:%d" % (host, port))
 
     seq = 0
     ep_i = 0
     batch = 0
     fails_total = 0
     last_ok = time.time()
-    working_ep = candidates[0]
     while True:
-        ep = candidates[ep_i % len(candidates)]
+        ep_addr = candidates[ep_i % len(candidates)]
+        ep = endpoints.get(ep_addr)
+        if ep is None:
+            ep_i += 1
+            continue
         try:
             ctrl_out(0x53, b"\x58\x5b\x01\x00")
             buf = bytearray()
             while len(buf) < FRAME_BYTES:
                 buf.extend(dev.read(ep, CHUNK, 500))
             if len(buf) != FRAME_BYTES:
-                print("short frame %d B on ep 0x%02x" % (len(buf), ep))
-                ep_i += 1                       # move to the next candidate
+                print("short frame %d B on ep 0x%02x" % (len(buf), ep_addr))
+                ep_i += 1
                 continue
             seq += 1
             batch += 1
             ok, _ = uploader.put_frame(bytes(buf))
             dt = (time.time() - last_ok) * 1000.0
             print("frame %d ok ep 0x%02x  %4.0f ms  upload=%s" %
-                  (seq, ep, dt, "ok" if ok else "FAILED"))
+                  (seq, ep_addr, dt, "ok" if ok else "FAILED"))
             fails_total = 0
             last_ok = time.time()
             if batch >= frames_per_batch:
                 batch = 0
                 time.sleep(0.5)
         except usb.core.USBError as e:
-            print("bulk fail on ep 0x%02x: %r" % (ep, e))
+            print("bulk fail on ep 0x%02x: %r" % (ep_addr, e))
             ep_i += 1
             fails_total += 1
             if fails_total > 40:
-                print("dev: giving up - restart the exe to re-probe")
+                print("dev: giving up - rerun the exe to re-probe")
                 return
             time.sleep(0.2)
 
