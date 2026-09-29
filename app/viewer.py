@@ -223,10 +223,14 @@ class NativeTransport:
         # candidates: also check PyInstaller's bundle dir; for a windowed
         # onefile build the dll is extracted to sys._MEIPASS, never the exe
         # folder, so plain ctypes.CDLL("name.dll") fails there.
-        cand = ["seeknanodirect.dll", "seeknanousb.dll"]
+        # Order matters: seeknanousb.dll (pure WinUSB API) is the transport
+        # we verified delivering 177 840-byte frames in 47-218 ms on the
+        # camera host; seeknanodirect.dll (libusb) enumerates the composite
+        # and its handshake returned rc=-30 on that same hardware.
+        cand = ["seeknanousb.dll", "seeknanodirect.dll"]
         if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
             cand = [os.path.join(sys._MEIPASS, n) for n in cand] + cand
-        for path, pfx in zip(cand, ["SNLB_", "SNLB_", "SN_", "SN_"]):
+        for path, pfx in zip(cand, ["SN_", "SN_", "SNLB_", "SNLB_"]):
             try:
                 d = _ct.CDLL(path)
                 getattr(d, pfx + "open").restype = _ct.c_int
@@ -384,6 +388,8 @@ class Stream(threading.Thread):
                 # first one (MI_00/0x81 wins on this hardware, see header).
                 order = [ep for (_i, ep) in eps
                          if ep in EP_CANDIDATES] or [ep for (_i, ep) in eps]
+                if 0x81 in order:                       # MI_00 = live stream
+                    order = [0x81] + [e for e in order if e != 0x81]
                 self.ep_order = order
                 self.put(("log", "bulk-in candidates: " +
                           ", ".join("0x%02x" % e for e in order)))
@@ -433,11 +439,11 @@ class Stream(threading.Thread):
                 except usb.core.USBError as ue:
                     fails += 1
                     self.trace("BULK FAIL %s (fails=%d): %s" % (type(ue).__name__, fails, ue))
-                    if fails == 2 and len(self.ep_order) > 1:
-                        # advance to the next candidate - MI_01/0x82 is
-                        # silent on this hardware so keep going until we
-                        # find the live endpoint rather than waiting for
-                        # a full reset round
+                    # switching endpoints mid-stream is what made the GUI
+                    # flicker: 0x82 is silent so rotation just produced a
+                    # live/dead alternation.  Only rotate after the pipe
+                    # has been genuinely dead for a sustained window.
+                    if fails == 8 and len(self.ep_order) > 1:
                         self.ep_i = (self.ep_i + 1) % len(self.ep_order)
                         ep_addr = self.ep_order[self.ep_i]
                         fails = 0
