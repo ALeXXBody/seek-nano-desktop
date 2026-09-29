@@ -83,15 +83,13 @@ jobs:
           case "$TAG" in v*) ;; *) TAG="v0.2.0-manual";; esac
           EXE_FILE=$(ls dist/*.exe | head -1)
           rm -f driver/install.ps1 driver/installer.cs && 7z a -tzip SeekNano-driver.zip ./driver/* seeknanousb.dll
-          # dev bundle: exe + both transport dlls in one folder, so the dev
-          # modes work after a plain extract (native loader needs the dll
-          # sitting next to the exe)
+          # dev bundle: exe + transport dlls next to the exe, keeping the
+          # names that `NativeTransport` actually looks up.
           mkdir -p devbundle
           cp "$EXE_FILE" devbundle/SeekNano.exe
-          cp seeknanousb.dll devbundle/SeekNano_usbtransport.dll 2>/dev/null || true
-          cp seeknanodirect.dll devbundle/SeekNano.dll 2>/dev/null || true
-          cp libusb-1.0.dll devbundle/ 2>/dev/null || true
-          mv devbundle/SeekNano.dll devbundle/seeknanodirect.dll 2>/dev/null || true
+          cp seeknanousb.dll devbundle/seeknanousb.dll
+          cp seeknanodirect.dll devbundle/seeknanodirect.dll
+          cp libusb-1.0.dll devbundle/libusb-1.0.dll
           7z a -tzip SeekNano-devbundle.zip ./devbundle/*
           gh release create "$TAG" "$EXE_FILE" SeekNano-driver.zip SeekNano-devbundle.zip --repo "$GITHUB_REPOSITORY" \
             --title "Seek Nano Viewer $TAG" \
