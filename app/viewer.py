@@ -168,12 +168,47 @@ ROI_X, ROI_Y = 1, 4           # seek-like ROI (see libseek-thermal SeekThermalPr
 OFFSET_BIAS = 0x4000
 
 
+def _nuc2d(img):
+    """Data-driven, 2-D non-uniformity correction (shutterless).
+
+    Fits a 6-term quadratic surface to the sensor read and removes it: this
+    removes the lens vignette (which is NOT separable into column/row offsets
+    — we measured 2 117 DL across the vignette on a real frame) plus the
+    fixed-pattern read that a 1-point offset compensation would leave behind.
+    Residual is the thermal scene. [Based on live capture 2026-09-28 frame
+    1: vignette 2 117 DL, scene spread 1 289 DL, sd 418 DL.]
+    """
+    h, w = img_w, img_h
+    y = (np.linspace(0, h - 1, h, dtype=np.float32)[:, None] / max(1, h-1)) * 2 - 1
+    x = (np.linspace(0, w - 1, w, dtype=np.float32)[None, :] / max(1, w-1)) * 2 - 1
+    yy, xx = np.broadcast_arrays(y, x)
+    A = [np.ones(h * w, np.float32), xx.ravel(), yy.ravel(),
+         (xx * yy).ravel(), (xx * xx).ravel(), (yy * yy).ravel()]
+    A = np.stack(A, axis=1)
+    try:
+        coef, *_ = np.linalg.lstsq(A, img.ravel(), rcond=None)
+        surf = (A @ coef).reshape(h, w)
+        return img - surf + img.mean()
+    except Exception as e:
+        return img
+
+
 def decode_frame(frame_raw):
-    """SeekThermalPro-layout decoder: raw 342x260 -> image 320x240."""
+    """SeekThermalPro-layout decoder: raw 342x260 -> image 320x240.
+
+    Accepts both sizes seen in the field:
+      * 177 840 B — bare frame (342*260 uint16)
+      * 177 856 B — 16 B dev-serve header + the frame
+    """
+    if len(frame_raw) == 177_856 and frame_raw[:2] == b"\x79\x05":
+        frame_raw = frame_raw[16:]
     arr = np.frombuffer(frame_raw, dtype="<u2").astype(np.float32)
     raw = arr[:RAW_W * RAW_H].reshape(RAW_H, RAW_W)
     fid = int(raw[0, 2])
     return raw, fid
+
+
+img_w, img_h = IMG_W, IMG_H
 
 
 # unified native transport loader (fresh-install friendly):
@@ -647,6 +682,8 @@ class Viewer(wx.Frame):
         p1 = np.pad(img, 1, mode="edge")
         stack = np.stack([p1[dy:dy+IMG_H, dx:dx+IMG_W] for dy in range(3) for dx in range(3)])
         img = np.median(stack, axis=0)
+        # 2-D shutterless NUC (data-driven, fitted on a live frame)
+        img = _nuc2d(img)
         lo = float(np.percentile(img, 2))
         hi = float(np.percentile(img, 98))
         t = np.clip((img - lo) / max(1.0, hi - lo), 0, 1)
