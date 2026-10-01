@@ -653,6 +653,18 @@ def decode_frame(frame_raw):
     return raw, fid
 
 
+def _pil_image():
+    """One PIL entry point used by every save path.
+
+    PIL was imported function-locally at three call sites; a missing PIL in
+    the bundled exe turned each into its own silent failure path with three
+    different messages. Import once here (cached by Python) so callers only
+    handle a single ImportError.
+    """
+    from PIL import Image
+    return Image
+
+
 img_w, img_h = IMG_W, IMG_H
 
 
@@ -978,7 +990,11 @@ class Stream(threading.Thread):
                     dt = last_ok - t0
                     if fails == 0 and period > MIN_PERIOD:
                         period = max(MIN_PERIOD, period - 0.005)
-                        if kicks % 12 == 0:
+                        if kicks % 12 == 0 and period > 0:
+                            # period can decay to exactly MIN_PERIOD (0.0)
+                            # for low dt; only report the inverse when it is
+                            # positive, else the pump thread dies with
+                            # ZeroDivisionError and the picture freezes
                             self.put(("log", "pacing %.0f ms (dt %.0f ms) ~ %.1fkicks/s" % (period*1000, dt*1000, 1.0/period)))
                     if len(buf) >= FRAME_BYTES:
                         fails = 0
@@ -1523,7 +1539,7 @@ class Viewer(wx.Frame):
         if hasattr(rgb, "astype"):
             rgb = rgb.astype(np.uint8)
         try:
-            from PIL import Image
+            Image = _pil_image()
             path = fmt % int(time.time())
             Image.fromarray(rgb).save(path)
             # written to the panel directly, not just queued: if the queue is
@@ -2078,8 +2094,7 @@ class Viewer(wx.Frame):
         """
         now = time.time()
         try:
-            from PIL import Image
-            im = Image.fromarray(rgb)
+            im = _pil_image().fromarray(rgb)
             # Ring of recent displayed frames, overwritten in place. Everything
             # measurable from outside the app has come back "the data is
             # stable", so keep what the DISPLAY actually produced and let it be
@@ -2796,7 +2811,7 @@ def dump_mode(outdir="dump", count=40):
         hi = float(np.percentile(img, 98))
         t = np.clip((img - lo) / max(1.0, hi - lo), 0, 1)
         try:
-            from PIL import Image
+            Image = _pil_image()
             Image.fromarray(lut(t).astype(np.uint8)).save(
                 "%s/frame_%03d.png" % (outdir, shown_n))
         except Exception as e:

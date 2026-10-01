@@ -21,7 +21,7 @@ jobs:
       - name: install deps
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pyusb numpy pyinstaller libusb-package wxPython
+          python -m pip install pyusb numpy pyinstaller libusb-package wxPython pillow
 
       - name: sign driver package (self-signed published catalog)
         shell: powershell
@@ -63,6 +63,9 @@ jobs:
       - name: run audit regression tests
         run: python tests/test_audit_fixes.py
         shell: bash
+      - name: pytest gate (portable, hardware-free suites only)
+        run: python -m pytest tests/test_audit_fixes.py tests/test_dev_mode.py -q
+        shell: bash
 
       - name: build exe
         run: |
@@ -71,6 +74,7 @@ jobs:
             --add-binary "seeknanodirect.dll;." `
             --add-binary "seeknanousb.dll;." `
             --collect-all libusb_package `
+            --collect-submodules PIL `
             --hidden-import usb.backend.libusb10 `
             app/viewer.py
         shell: powershell

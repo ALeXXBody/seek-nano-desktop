@@ -178,6 +178,34 @@ class TestCTransportGuards(unittest.TestCase):
                          "each failure after LoadLibrary must FreeLibrary")
 
 
+class TestLogIOAndNoZeroDiv(unittest.TestCase):
+    """Batch-2/3 followups reported by the user."""
+
+    def test_no_zero_division_in_pacing_log(self):
+        # max(0.0, period-0.005) clamps period to 0.0 for shallow decay; the
+        # inverse was then taken unconditionally once per 12 kicks
+        src = open(os.path.join(REPO, "app", "viewer.py"),
+                   encoding="utf-8").read()
+        self.assertIn("if kicks % 12 == 0 and period > 0", src)
+        # and no naked inverse on period elsewhere
+        self.assertEqual(src.count("1.0/period"), 1)
+
+    def test_single_pil_entry_point(self):
+        src = open(os.path.join(REPO, "app", "viewer.py"),
+                   encoding="utf-8").read()
+        # the only function-local PIL import is inside the shared helper;
+        # every save path goes through _pil_image()
+        self.assertEqual(src.count("from PIL import Image"), 1)
+        self.assertIn("def _pil_image(", src)
+        self.assertGreaterEqual(src.count("_pil_image()"), 3)
+        import _paths  # imports cleanly
+        # the loader itself raises exactly ImportError when PIL is absent
+        import PIL
+        if not hasattr(PIL, "Image"):
+            with self.assertRaises(ImportError):
+                viewer._pil_image()
+
+
 class TestDisplayFreezeWhenPaused(unittest.TestCase):
     """Regression: while paused, the newest pump frame must NOT be able to
     reach the screen through a stray paint event. The shown frame is pinned
