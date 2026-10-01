@@ -9,6 +9,7 @@ No hardware or live capture data required.
 import importlib.util
 import inspect
 import os
+import queue
 import sys
 import types
 import unittest
@@ -258,6 +259,29 @@ class TestDllCandidatesOrder(unittest.TestCase):
                             if pref == "SN_"),
                         min(i for i, (path, pref) in enumerate(seen_pathed)
                             if pref == "SNLB_"))
+
+
+class TestDumpGate(unittest.TestCase):
+    """_dump_pngs: missing PIL must not flood the log - both throttles back
+    off, and after 3 failures the dumps disable permanently (one line)."""
+
+    def _mk(self):
+        v = viewer.Viewer.__new__(viewer.Viewer)
+        v.q = queue.Queue()
+        return v
+
+    def test_disabled_gate_short_circuits(self):
+        v = self._mk()
+        v._dump_disabled = True
+        v._dump_pngs("not-even-an-array")   # must not raise / touch _PIL
+
+    def test_three_failures_disable(self):
+        v = self._mk()
+        for i in range(3):
+            n_before = v.q.qsize()
+            v._dump_pngs(None)              # _pil_image() raises -> counter
+            self.assertEqual(v.q.qsize(), n_before + 1)
+        self.assertTrue(getattr(v, "_dump_disabled", False))
 
 
 if __name__ == "__main__":

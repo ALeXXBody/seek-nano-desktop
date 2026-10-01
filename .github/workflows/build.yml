@@ -21,7 +21,7 @@ jobs:
       - name: install deps
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pyusb numpy pyinstaller libusb-package wxPython pillow
+          python -m pip install pyusb numpy pyinstaller libusb-package wxPython pillow pytest
 
       - name: sign driver package (self-signed published catalog)
         shell: powershell
@@ -74,7 +74,7 @@ jobs:
             --add-binary "seeknanodirect.dll;." `
             --add-binary "seeknanousb.dll;." `
             --collect-all libusb_package `
-            --collect-submodules PIL `
+            --collect-all PIL `
             --hidden-import usb.backend.libusb10 `
             app/viewer.py
         shell: powershell
@@ -82,6 +82,7 @@ jobs:
       - name: smoke-check exe
         shell: cmd
         run: |
+          dist\SeekNano.exe --check-pil || exit /b 1
           dist\SeekNano.exe --selftest || exit /b 1
       - name: upload release
         run: |        

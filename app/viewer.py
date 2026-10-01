@@ -502,7 +502,10 @@ def _neighbour_median(a):
         for dx in (-1, 0, 1):
             if dy or dx:
                 stack.append(np.roll(np.roll(a, dy, 0), dx, 1))
-    return np.median(np.stack(stack), axis=0)
+    s = np.stack(stack)                       # 8 entries; np.median takes the
+    mid = np.partition(s, (3, 4), axis=0)     # mean of the two central order
+    return (mid[3] + mid[4]) / 2              # statistics - same value, no
+                                              # redundant second pass
 
 
 def _detect_bad_pixels(bank, k=BAD_K, min_dl=BAD_MIN_DL, min_frac=0.5):
@@ -2093,6 +2096,8 @@ class Viewer(wx.Frame):
         the timer instead, which keeps the paint path to a blit.
         """
         now = time.time()
+        if getattr(self, "_dump_disabled", False):
+            return
         try:
             im = _pil_image().fromarray(rgb)
             # Ring of recent displayed frames, overwritten in place. Everything
@@ -2116,8 +2121,22 @@ class Viewer(wx.Frame):
                 self._last_dump = now
                 im.save(LATEST_PNG)
         except Exception as e:
-            self._last_dump = now + 5.0            # back off if it keeps failing
-            self.q.put(("log", "frame dump failed: %r" % (e,)))
+            # BOTH throttles must back off. The handler used to advance only
+            # _last_dump while the burst branch keyed off _last_burst, so a
+            # missing/broken PIL retried every 0.2 s and flooded the log -
+            # 5,517 errors in one recorded session.
+            self._last_dump = now + 5.0
+            self._last_burst = now + 1.0
+            fails = getattr(self, "_dump_fails", 0) + 1
+            self._dump_fails = fails
+            if fails >= 3:
+                self._dump_disabled = True
+                self.q.put(("log", "frame dumps disabled after %d failures - "
+                                   "they are diagnostics; the viewer runs "
+                                   "fine without them (last: %r)" % (fails, e)))
+            else:
+                self.q.put(("log", "frame dump failed: %r (attempt %d)" % (
+                    e, fails)))
 
     def _to_bitmap(self, rgb):
         """numpy RGB -> wx.Bitmap, built fresh every paint.
@@ -2829,6 +2848,22 @@ def dump_mode(outdir="dump", count=40):
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
         selftest()
+    elif "--check-pil" in sys.argv:
+        # CI harness: prove the bundled PIL is real. Allocates an image,
+        # writes a pixel, reads it back - a missing/broken bundle fails the
+        # build here instead of reaching a user (who would only see
+        # "saved nothing" and a log flood).
+        try:
+            Image = _pil_image()
+            a = np.zeros((4, 4, 3), dtype=np.uint8)
+            a[1, 1] = [1, 2, 3]
+            back = np.array(Image.fromarray(a))
+            if back[1, 1].tolist() != [1, 2, 3]:
+                raise RuntimeError("pixel round-trip mismatch")
+        except Exception as e:
+            print("check-pil FAIL: %r" % e)
+            sys.exit(1)
+        print("check-pil ok")
     elif "--dump-processed" in sys.argv:
         # headless: write what the window would draw, to confirm the pipeline
         i = sys.argv.index("--dump-processed") + 1
