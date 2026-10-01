@@ -40,9 +40,13 @@ class SeekNanoDriverInstaller
             Console.WriteLine("This replaces any existing binding for this camera.");
             Console.WriteLine();
 
-            // Parent device, then each composite interface. WinUSB is type 0.
+            // The two composite interfaces only. The parent node
+            // USB\VID_289D&PID_0011 must stay unbound - per seeknano.inf it is
+            // owned by another (USBIP/VBox) stack and claiming it fights that
+            // filter driver, which left both MI_* children dead after the
+            // 2026-09-29 bind run. Binding MI_00/MI_01 is what sncap.exe and
+            // the transports actually use.
             string[] args = {
-                "-n \"Seek Nano Thermal\" -m \"Seek Thermal\" -v 0x289D -p 0x0011 -t 0 -l 0",
                 "-n \"Seek Nano Thermal IF0\" -m \"Seek Thermal\" -v 0x289D -p 0x0011 -i 0 -t 0 -l 0",
                 "-n \"Seek Nano Thermal IF1\" -m \"Seek Thermal\" -v 0x289D -p 0x0011 -i 1 -t 0 -l 0"
             };
@@ -60,7 +64,9 @@ class SeekNanoDriverInstaller
                 Console.WriteLine("One or more installs returned " + worst + ". Unplug/replug and try SeekNano.exe anyway.");
             Console.Write("Press Enter to close... ");
             Console.ReadLine();
-            return 0;
+            // propagate the worst child-install result so callers
+            // (scripts, MSI) see a partial failure as a failure
+            return worst;
         }
         catch (Exception e)
         {

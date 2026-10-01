@@ -60,6 +60,9 @@ jobs:
       - name: run dev-mode test harness
         run: python tests/test_dev_mode.py
         shell: bash
+      - name: run audit regression tests
+        run: python tests/test_audit_fixes.py
+        shell: bash
 
       - name: build exe
         run: |

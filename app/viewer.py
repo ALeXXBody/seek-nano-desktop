@@ -636,6 +636,22 @@ img_w, img_h = IMG_W, IMG_H
 #   seeknanousb.dll    (pure WinUSB API path)
 import ctypes as _ct
 
+def dll_candidates(mei=None):
+    """Return (path, prefix) pairs in probe order.
+
+    seeknanousb.dll exports SN_*, seeknanodirect.dll exports SNLB_* —
+    the same pairing dev_serve uses. In a frozen onefile build the dlls
+    are extracted under sys._MEIPASS, so those paths come first.
+    """
+    pairs = [
+        ("seeknanousb.dll", "SN_"),
+        ("seeknanodirect.dll", "SNLB_"),
+    ]
+    if mei is not None:
+        pairs = [(os.path.join(mei, n), p) for n, p in pairs] + pairs
+    return pairs
+
+
 class NativeTransport:
     def __init__(self):
         self.k = None
@@ -647,10 +663,8 @@ class NativeTransport:
         # we verified delivering 177 840-byte frames in 47-218 ms on the
         # camera host; seeknanodirect.dll (libusb) enumerates the composite
         # and its handshake returned rc=-30 on that same hardware.
-        cand = ["seeknanousb.dll", "seeknanodirect.dll"]
-        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-            cand = [os.path.join(sys._MEIPASS, n) for n in cand] + cand
-        for path, pfx in zip(cand, ["SN_", "SN_", "SNLB_", "SNLB_"]):
+        mei = getattr(sys, "_MEIPASS", None) if getattr(sys, "frozen", False) else None
+        for path, pfx in dll_candidates(mei):
             try:
                 d = _ct.CDLL(path)
                 getattr(d, pfx + "open").restype = _ct.c_int
@@ -991,10 +1005,15 @@ class Stream(threading.Thread):
             self.trace(tb)
             self.q.put(("error", tb.splitlines()[-1] if tb else "unknown"))
         finally:
-            try:
-                usb.util.dispose_resources(self.dev)
-            except Exception:
-                pass
+            # self.dev may never have been assigned if find/set_configuration
+            # failed above; touching a missing attribute here would replace
+            # the real traceback with an AttributeError.
+            dev = getattr(self, "dev", None)
+            if dev is not None and dev is not True:
+                try:
+                    usb.util.dispose_resources(dev)
+                except Exception:
+                    pass
 
 
 class Viewer(wx.Frame):
@@ -1537,7 +1556,6 @@ class Viewer(wx.Frame):
             dc.DrawBitmap(bmp, 0, 0)
         except Exception:
             self._show_fatal("draw", sys.exc_info())
-        dc.DrawBitmap(bmp, 0, 0)
 
     def _detect_spots(self, img):
         """Run the detector on corrected device-unit values and update state."""

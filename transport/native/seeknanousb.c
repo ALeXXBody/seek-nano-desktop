@@ -106,6 +106,10 @@ __declspec(dllexport) int SN_open(void)
     }
     PSP_DEVICE_INTERFACE_DETAIL_DATA_W det =
         (PSP_DEVICE_INTERFACE_DETAIL_DATA_W)HeapAlloc(GetProcessHeap(), 0, need);
+    if (!det) {
+        SetupDiDestroyDeviceInfoList(devInfo);
+        return -3;
+    }
     det->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W);
     if (!SetupDiGetDeviceInterfaceDetailW(devInfo, &di, det, need, NULL, NULL)) {
         HeapFree(GetProcessHeap(), 0, det);
@@ -116,7 +120,7 @@ __declspec(dllexport) int SN_open(void)
                         GENERIC_WRITE | GENERIC_READ,
                         FILE_SHARE_READ | FILE_SHARE_WRITE,
                         NULL, OPEN_EXISTING,
-                        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL);
+                        FILE_ATTRIBUTE_NORMAL, NULL);
     HeapFree(GetProcessHeap(), 0, det);
     SetupDiDestroyDeviceInfoList(devInfo);
     if (g_dev == INVALID_HANDLE_VALUE)

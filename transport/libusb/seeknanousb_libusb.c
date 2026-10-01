@@ -65,10 +65,18 @@ static int load_libusb(void)
     g_libusb = LoadLibraryW(L"libusb-1.0.dll");
     if (!g_libusb) return -1;
     for (unsigned i = 0; i < SYM_N; i++)
-        if (!(*syms[i].pp = (void*)GetProcAddress(g_libusb, syms[i].name)))
+        if (!(*syms[i].pp = (void*)GetProcAddress(g_libusb, syms[i].name))) {
+            /* a partial symbol table must never look "loaded": a retry with
+             * g_libusb non-NULL would call a NULL function pointer */
+            FreeLibrary(g_libusb);
+            g_libusb = NULL;
             return -2;
-    if (p_libusb_init(&g_ctx) != 0)
+        }
+    if (p_libusb_init(&g_ctx) != 0) {
+        FreeLibrary(g_libusb);
+        g_libusb = NULL;
         return -3;
+    }
     return 0;
 }
 
