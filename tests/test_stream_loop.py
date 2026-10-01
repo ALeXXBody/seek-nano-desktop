@@ -1,3 +1,8 @@
+# portable-path header (see _paths.py); camera-box-only paths
+# keep their default under SN_CAM_BASE/SN_OUT overrides
+import _paths
+from _paths import VIEWER, APP_DIR, PCDRIVER, LIBUSB_DLL, BUILT_EXE, OUT, CAM_BASE  # noqa
+
 """Reproduce the app's read loop EXACTLY, at its real kick pacing.
 
 The earlier endpoint test read FRAME_BYTES+CHUNK and rescued the frame from the
@@ -7,12 +12,12 @@ per-chunk timeout, 40 ms target period, fails>60 gives up.
 """
 import ast, os, time, pathlib
 import numpy as np
-DLL = r"C:\a\libusb-1.0.dll"
+DLL = str(LIBUSB_DLL)
 os.add_dll_directory(os.path.dirname(DLL))
 os.environ["PATH"] = os.path.dirname(DLL) + os.pathsep + os.environ["PATH"]
 import usb.core, usb.util
 
-SRC = pathlib.Path(r"C:\a\src\app\viewer.py")
+SRC = VIEWER
 ns = {"np": np}
 src = SRC.read_text(encoding="utf-8")
 for n in ast.parse(src).body:

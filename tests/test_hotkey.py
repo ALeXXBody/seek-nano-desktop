@@ -1,3 +1,8 @@
+# portable-path header (see _paths.py); camera-box-only paths
+# keep their default under SN_CAM_BASE/SN_OUT overrides
+import _paths
+from _paths import VIEWER, APP_DIR, PCDRIVER, LIBUSB_DLL, BUILT_EXE, OUT, CAM_BASE  # noqa
+
 """Do the hotkeys reach their handlers no matter what has focus?
 
 The previous version of this test built a toy frame with its OWN bindings,
@@ -21,7 +26,7 @@ import ast
 import pathlib
 import sys
 
-SRC = pathlib.Path(r"C:\a\src\app\viewer.py")
+SRC = VIEWER
 TEXT = SRC.read_text(encoding="utf-8")
 FAIL = []
 

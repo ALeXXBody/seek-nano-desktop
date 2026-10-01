@@ -1,3 +1,8 @@
+# portable-path header (see _paths.py); camera-box-only paths
+# keep their default under SN_CAM_BASE/SN_OUT overrides
+import _paths
+from _paths import VIEWER, APP_DIR, PCDRIVER, LIBUSB_DLL, BUILT_EXE, OUT, CAM_BASE  # noqa
+
 """FFC proof: can a wall reference actually remove this sensor's static?
 
 Setup mirrors the measured device (2026-09-30):
@@ -14,7 +19,7 @@ FFC file round-trip in the repo's u16 ROI convention (ffc_latest.raw).
 """
 import ast, pathlib, sys, numpy as np
 
-SRC = pathlib.Path(r"C:\a\src\app\viewer.py")
+SRC = VIEWER
 WANT = {"_boxblur", "_nuc2d", "_apply_ffc", "_roi_u16"}
 ns = {"np": np}
 src = SRC.read_text(encoding="utf-8")
@@ -81,7 +86,7 @@ print(f"  DC preserved: {d0:.1f} -> {o.mean():.1f} (drift {100*abs(o.mean()-d0)/
       f"{'OK' if abs(o.mean()-d0) < 0.01*d0 else 'FAIL'}")
 bad = _apply(live, np.zeros((10, 10)))
 print(f"  wrong-shape reference refused: {'OK' if np.shares_memory(bad, live) or np.array_equal(bad, live) else 'FAIL'}")
-tmp = pathlib.Path(r"C:\a\out\_ffc_roundtrip.raw")
+tmp = OUT / r'_ffc_roundtrip.raw'
 np.clip(np.rint(ref), 0, 65535).astype("<u2").tofile(tmp)  # same as _finish_flat
 back = np.fromfile(tmp, dtype="<u2").reshape(IH, IW).astype(np.float32)
 print(f"  u16 file round-trip max err {np.abs(back-ref).max():.1f} DL (want <=0.5): "

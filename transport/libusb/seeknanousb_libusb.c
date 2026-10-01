@@ -62,7 +62,29 @@ static HMODULE g_libusb = NULL;
 static int load_libusb(void)
 {
     if (g_libusb) return 0;
-    g_libusb = LoadLibraryW(L"libusb-1.0.dll");
+    /* resolve libusb-1.0.dll from OUR OWN module directory first, never a
+     * bare PATH/cwd search: this dll is shipped next to an unsigned exe in a
+     * user-downloaded folder, so a planted libusb-1.0.dll on PATH wins the
+     * search order. GetModuleHandleW(NULL) is the exe; the dll itself sits
+     * beside it in the dev bundle, so the exe dir is the right first shot. */
+    wchar_t dir[MAX_PATH];
+    HMODULE self = NULL;
+    /* FROM_ADDRESS on a function in this file = our own module */
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                       (LPCWSTR)&load_libusb, &self);
+    DWORD n = self ? GetModuleFileNameW(self, dir, MAX_PATH) : 0;
+    if (n > 0 && n < MAX_PATH) {
+        wchar_t full[MAX_PATH];
+        const wchar_t* last = dir;
+        for (const wchar_t* p = dir; *p; p++)
+            if (*p == L'\\' || *p == L'/') last = p;
+        size_t dl = (size_t)(last - dir);
+        lstrcpynW(full, dir, (int)dl + 1);
+        lstrcatW(full, L"\\libusb-1.0.dll");
+        g_libusb = LoadLibraryW(full);
+    }
+    if (!g_libusb)
+        g_libusb = LoadLibraryW(L"libusb-1.0.dll");
     if (!g_libusb) return -1;
     for (unsigned i = 0; i < SYM_N; i++)
         if (!(*syms[i].pp = (void*)GetProcAddress(g_libusb, syms[i].name))) {
@@ -179,7 +201,7 @@ __declspec(dllexport) int SNLB_stream_start(void)
     unsigned char imgproc[2] = { 0x08, 0x00 };
     unsigned char cfg[4]  = { 0xfc, 0x00, 0x04, 0x00 };
     unsigned char on[2]   = { 0x01, 0x00 };
-    int pf, r, i;
+    int r, i;
 
     nlog("start: phase 1");
     if (c_out(0x54, 2, z2)  < 0) return -10;

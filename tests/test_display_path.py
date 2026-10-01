@@ -1,3 +1,8 @@
+# portable-path header (see _paths.py); camera-box-only paths
+# keep their default under SN_CAM_BASE/SN_OUT overrides
+import _paths
+from _paths import VIEWER, APP_DIR, PCDRIVER, LIBUSB_DLL, BUILT_EXE, OUT, CAM_BASE  # noqa
+
 """Prove the whole display chain with the real GUI code, headless.
 
 Runs the shipped tick() and on_paint() against captured frames with a stub wx,
@@ -7,9 +12,9 @@ tells us where frames stop if it still misbehaves on your machine.
 """
 import ast, pathlib, sys, types, numpy as np
 
-SRC = pathlib.Path(r"C:\a\src\app\viewer.py")
-SEE = pathlib.Path(r"C:\a\out\see")
-FPN = pathlib.Path(r"C:\a\out\fpn")
+SRC = VIEWER
+SEE = OUT / r'see'
+FPN = OUT / r'fpn'
 
 ns = {"np": np, "sys": sys, "os": __import__("os")}
 src = SRC.read_text(encoding="utf-8")
@@ -170,7 +175,7 @@ for ln in panel.log.lines:
 if panel.shown_frames == 0:
     print("\nFAIL: no frame reached the screen")
     fails.append(("all", "nothing shown"))
-crash = pathlib.Path(r"C:\a\seeknano_crash.log")
+crash = OUT / "seeknano_crash.log"
 if crash.exists() and fails:
     print(f"\nNOTE: {crash} exists - the GUI handlers DID throw:")
     print(crash.read_text()[-1500:])

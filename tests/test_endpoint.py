@@ -5,14 +5,17 @@ Checks the three facts behind the EP_CANDIDATES change, on the live device:
   2. reading 0x82 (unclaimed interface) raises, which is what killed the thread
   3. 0x81 yields real frames through the shipped validation
 """
+import sys as _sys, pathlib as _pl
+_sys.path.insert(0, str(_pl.Path(__file__).resolve().parent))
+from _paths import VIEWER, APP_DIR, PCDRIVER, LIBUSB_DLL, BUILT_EXE, OUT, CAM_BASE  # noqa
 import os, time, pathlib, ast
 import numpy as np
-DLL = r"C:\a\libusb-1.0.dll"
+DLL = str(LIBUSB_DLL)
 os.add_dll_directory(os.path.dirname(DLL))
 os.environ["PATH"] = os.path.dirname(DLL) + os.pathsep + os.environ["PATH"]
 import usb.core, usb.util
 
-SRC = pathlib.Path(r"C:\a\src\app\viewer.py")
+SRC = VIEWER
 ns = {"np": np}
 src = SRC.read_text(encoding="utf-8")
 for n in ast.parse(src).body:

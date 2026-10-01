@@ -1,3 +1,8 @@
+# portable-path header (see _paths.py); camera-box-only paths
+# keep their default under SN_CAM_BASE/SN_OUT overrides
+import _paths
+from _paths import VIEWER, APP_DIR, PCDRIVER, LIBUSB_DLL, BUILT_EXE, OUT, CAM_BASE  # noqa
+
 """One bad frame must not be able to steer the contrast window.
 
 This is the pulsing. Measured on this hardware: raw p98 sat steady at 7114 DL
@@ -18,7 +23,7 @@ import types
 
 import numpy as np
 
-SRC = pathlib.Path(r"C:\a\src\app\viewer.py")
+SRC = VIEWER
 TEXT = SRC.read_text(encoding="utf-8")
 tree = ast.parse(TEXT)
 ns = {"np": np, "collections": collections, "deque": collections.deque,

@@ -661,19 +661,28 @@ img_w, img_h = IMG_W, IMG_H
 #   seeknanousb.dll    (pure WinUSB API path)
 import ctypes as _ct
 
-def dll_candidates(mei=None):
+def dll_candidates(mei=None, exe_dir=None, module_dir=None):
     """Return (path, prefix) pairs in probe order.
 
     seeknanousb.dll exports SN_*, seeknanodirect.dll exports SNLB_* —
-    the same pairing dev_serve uses. In a frozen onefile build the dlls
-    are extracted under sys._MEIPASS, so those paths come first.
+    the same pairing every consumer uses. Probing order:
+      1. sys._MEIPASS (frozen onefile build: dlls extracted there)
+      2. the exe folder, then this module's folder — absolute paths only
+      3. the bare name as a last resort
+    Absolute paths first keep the load from being decided by a bare-name
+    search over PATH/cwd (DLL side-load hardening).
     """
-    pairs = [
-        ("seeknanousb.dll", "SN_"),
-        ("seeknanodirect.dll", "SNLB_"),
-    ]
+    NAMES = [("seeknanousb.dll", "SN_"), ("seeknanodirect.dll", "SNLB_")]
+    pairs = []
+    dirs = []
     if mei is not None:
-        pairs = [(os.path.join(mei, n), p) for n, p in pairs] + pairs
+        dirs.append(mei)
+    for extra in (exe_dir, module_dir):
+        if extra:
+            dirs.append(extra)
+    for dr in dirs:
+        pairs.extend((os.path.join(dr, n), p) for n, p in NAMES)
+    pairs.extend(NAMES)  # bare-name fallback last
     return pairs
 
 
@@ -689,7 +698,10 @@ class NativeTransport:
         # camera host; seeknanodirect.dll (libusb) enumerates the composite
         # and its handshake returned rc=-30 on that same hardware.
         mei = getattr(sys, "_MEIPASS", None) if getattr(sys, "frozen", False) else None
-        for path, pfx in dll_candidates(mei):
+        exe_dir = (os.path.dirname(os.path.abspath(sys.executable))
+                   if getattr(sys, "frozen", False) else None)
+        mod_dir = os.path.dirname(os.path.abspath(__file__))
+        for path, pfx in dll_candidates(mei, exe_dir, mod_dir):
             try:
                 d = _ct.CDLL(path)
                 getattr(d, pfx + "open").restype = _ct.c_int
@@ -2555,33 +2567,31 @@ def dev_serve(target_url="192.168.50.200:8100", frames_per_batch=3):
     # directly on this hardware.  seeknanodirect.dll (libusb) enumerates the
     # composite and lands on the *silent* MI_01 half (stream_start rc=-30).
     name = pfx = d = None
-    frozen_cand = []
-    base_dir = (sys._MEIPASS if getattr(sys, "frozen", False) and
-                hasattr(sys, "_MEIPASS") else
-                os.path.dirname(os.path.abspath(sys.executable)) if
-                getattr(sys, "frozen", False) else
-                os.path.dirname(os.path.abspath(__file__)))
-    for fn, pfx_ in (("seeknanousb.dll", "SN_"), ("seeknanodirect.dll", "SNLB_")):
-        for path in (os.path.join(base_dir, fn), fn):
-            try:
-                d_ = _ct.CDLL(path)
-                getattr(d_, pfx_ + "open").restype = _ct.c_int
-                getattr(d_, pfx_ + "stream_start").restype = _ct.c_int
-                getattr(d_, pfx_ + "get_frame").restype = _ct.c_int
-                getattr(d_, pfx_ + "get_frame").argtypes = [_ct.c_char_p]
-                getattr(d_, pfx_ + "stream_stop").restype = _ct.c_int
-                getattr(d_, pfx_ + "close").restype = None
-                name, pfx, d = fn, pfx_, d_
-                break
-            except Exception:
-                continue
+    mei = sys._MEIPASS if getattr(sys, "frozen", False) and \
+        hasattr(sys, "_MEIPASS") else None
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable)) if \
+        getattr(sys, "frozen", False) else None
+    for path, pfx_ in dll_candidates(mei, exe_dir,
+                                     os.path.dirname(os.path.abspath(__file__))):
+        try:
+            d_ = _ct.CDLL(path)
+            getattr(d_, pfx_ + "open").restype = _ct.c_int
+            getattr(d_, pfx_ + "stream_start").restype = _ct.c_int
+            getattr(d_, pfx_ + "get_frame").restype = _ct.c_int
+            getattr(d_, pfx_ + "get_frame").argtypes = [_ct.c_char_p]
+            getattr(d_, pfx_ + "stream_stop").restype = _ct.c_int
+            getattr(d_, pfx_ + "close").restype = None
+            name, pfx, d = os.path.basename(path), pfx_, d_
+            break
+        except Exception:
+            continue
         if name is not None:
             break
     if name is None:
         say("dev: no native transport dll found next to SeekNano.exe ({})\n"
             "Download SeekNano-devbundle.zip from the release and extract "
             "it next to the exe (seeknanousb.dll + seeknanodirect.dll)."
-            .format(base_dir), True)
+            .format(exe_dir or os.path.dirname(os.path.abspath(__file__))), True)
         return
     say("dev transport: " + name)
 

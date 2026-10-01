@@ -1,3 +1,8 @@
+# portable-path header (see _paths.py); camera-box-only paths
+# keep their default under SN_CAM_BASE/SN_OUT overrides
+import _paths
+from _paths import VIEWER, APP_DIR, PCDRIVER, LIBUSB_DLL, BUILT_EXE, OUT, CAM_BASE  # noqa
+
 """Frame validation on real captured frames.
 
 Deliberately narrow now: the header checks (magic + gain) are the only gates,
@@ -11,9 +16,9 @@ Captured sets:
 """
 import ast, pathlib, sys, numpy as np
 
-SRC = pathlib.Path(r"C:\a\src\app\viewer.py")
-SEE = pathlib.Path(r"C:\a\out\see")
-FPN = pathlib.Path(r"C:\a\out\fpn")
+SRC = VIEWER
+SEE = OUT / r'see'
+FPN = OUT / r'fpn'
 
 ns = {"np": np}
 src = SRC.read_text(encoding="utf-8")

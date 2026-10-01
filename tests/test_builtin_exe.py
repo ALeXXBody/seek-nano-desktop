@@ -1,3 +1,8 @@
+# portable-path header (see _paths.py); camera-box-only paths
+# keep their default under SN_CAM_BASE/SN_OUT overrides
+import _paths
+from _paths import VIEWER, APP_DIR, PCDRIVER, LIBUSB_DLL, BUILT_EXE, OUT, CAM_BASE  # noqa
+
 """Prove the BUILT SeekNano.exe contains the FFC fix (not the reverted mask).
 
 Extracts the frozen viewer module out of the PyInstaller archive and checks:
@@ -14,8 +19,7 @@ import types
 import numpy as np
 from PyInstaller.archive.readers import CArchiveReader
 
-EXE = pathlib.Path(r"C:\a\src\dist\SeekNano.exe")
-OUT = pathlib.Path(r"C:\a\out")
+EXE = pathlib.Path(str(BUILT_EXE))
 RW, RH, RX, RY = 342, 260, 1, 4
 
 

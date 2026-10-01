@@ -1,3 +1,8 @@
+# portable-path header (see _paths.py); camera-box-only paths
+# keep their default under SN_CAM_BASE/SN_OUT overrides
+import _paths
+from _paths import VIEWER, APP_DIR, PCDRIVER, LIBUSB_DLL, BUILT_EXE, OUT, CAM_BASE  # noqa
+
 """Run the reference driver (pcdriver/seek_nano.py) but keep streaming and
 report per-frame statistics, instead of its single-shot read_frame().
 
@@ -10,15 +15,15 @@ Two variables this isolates:
 import os, sys, time, pathlib
 import numpy as np
 
-DLL = r"C:\a\libusb-1.0.dll"
+DLL = str(LIBUSB_DLL)
 os.add_dll_directory(os.path.dirname(DLL))
 os.environ["PATH"] = os.path.dirname(DLL) + os.pathsep + os.environ["PATH"]
-sys.path.insert(0, r"C:\a\src\pcdriver")
+sys.path.insert(0, str(PCDRIVER))
 
 import seek_nano as sn
 import usb.core, usb.util
 
-OUT = pathlib.Path(r"C:\a\out"); OUT.mkdir(exist_ok=True)
+OUT.mkdir(exist_ok=True)
 N = 20
 RAW_W, RAW_H, ROI_X, ROI_Y = 342, 260, 1, 4
 

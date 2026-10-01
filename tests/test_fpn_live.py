@@ -1,3 +1,8 @@
+# portable-path header (see _paths.py); camera-box-only paths
+# keep their default under SN_CAM_BASE/SN_OUT overrides
+import _paths
+from _paths import VIEWER, APP_DIR, PCDRIVER, LIBUSB_DLL, BUILT_EXE, OUT, CAM_BASE  # noqa
+
 """The static must come down WITHOUT taking the scene with it.
 
 The previous version of this test only measured neighbour noise, and so passed
@@ -10,8 +15,8 @@ produced, and on synthetic ground truth where the true scene is known.
 """
 import ast, pathlib, sys, numpy as np
 
-SRC = pathlib.Path(r"C:\a\src\app\viewer.py")
-D = pathlib.Path(r"C:\a\out\fpn")
+SRC = VIEWER
+D = OUT / r'fpn'
 
 ns = {"np": np}
 src = SRC.read_text(encoding="utf-8")

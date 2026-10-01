@@ -26,46 +26,47 @@ class SeekNanoDriverInstaller
         try
         {
             string here = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? ".";
-            string wdi = Path.Combine(here, "wdi-simple.exe");
-            if (!File.Exists(wdi))
+            string inf = Path.Combine(here, "seeknano.inf");
+            if (!File.Exists(inf))
             {
-                Console.Error.WriteLine("wdi-simple.exe missing next to the installer.");
+                Console.Error.WriteLine("seeknano.inf missing next to the installer.");
                 Console.Write("Press Enter to close... ");
                 Console.ReadLine();
                 return 2;
             }
 
             Console.WriteLine("Seek Nano driver install");
-            Console.WriteLine("VID 289D  PID 0011  driver WinUSB");
-            Console.WriteLine("This replaces any existing binding for this camera.");
+            Console.WriteLine("VID 289D  PID 0011  driver WinUSB (child interfaces only)");
+            Console.WriteLine("This replaces any existing binding for this camera's two");
+            Console.WriteLine("composite interfaces (MI_00 / MI_01). The parent USB node is");
+            Console.WriteLine("deliberately NOT bound - see seeknano.inf.");
             Console.WriteLine();
 
-            // The two composite interfaces only. The parent node
-            // USB\VID_289D&PID_0011 must stay unbound - per seeknano.inf it is
-            // owned by another (USBIP/VBox) stack and claiming it fights that
-            // filter driver, which left both MI_* children dead after the
-            // 2026-09-29 bind run. Binding MI_00/MI_01 is what sncap.exe and
-            // the transports actually use.
-            string[] args = {
-                "-n \"Seek Nano Thermal IF0\" -m \"Seek Thermal\" -v 0x289D -p 0x0011 -i 0 -t 0 -l 0",
-                "-n \"Seek Nano Thermal IF1\" -m \"Seek Thermal\" -v 0x289D -p 0x0011 -i 1 -t 0 -l 0"
-            };
-            int worst = 0;
-            foreach (var a in args)
-            {
-                int c = Run(wdi, a);
-                if (c != 0 && worst == 0) worst = c;
-            }
+            // pnputil stages the INF package (the CI-signed seeknano.cat is
+            // matched by hash). This used to shell out to wdi-simple.exe,
+            // which was never shipped and silently broke every install.
+            int worst = Run("pnputil", "/add-driver \"" + inf + "\" /install");
+            if (worst == 0)
+                Run("pnputil", "/scan-devices");
 
             Console.WriteLine();
             if (worst == 0)
-                Console.WriteLine("Installed. Unplug the camera, plug it back in, then run SeekNano.exe.");
+            {
+                Console.WriteLine("Driver package installed. Unplug the camera, plug it back in,");
+                Console.WriteLine("then run SeekNano.exe.");
+            }
             else
-                Console.WriteLine("One or more installs returned " + worst + ". Unplug/replug and try SeekNano.exe anyway.");
+            {
+                Console.WriteLine("pnputil returned " + worst + ".");
+                Console.WriteLine("If Windows refused to install an unsigned driver:");
+                Console.WriteLine("  1. Device Manager -> the 'Seek' device with the yellow mark");
+                Console.WriteLine("  2. Update driver -> Browse -> Let me pick -> Have disk            ");
+                Console.WriteLine("     -> select seeknano.inf in this folder");
+                Console.WriteLine("(that happens because this package is self-signed, not WHQL'd).");
+            }
             Console.Write("Press Enter to close... ");
             Console.ReadLine();
-            // propagate the worst child-install result so callers
-            // (scripts, MSI) see a partial failure as a failure
+            // propagate the result so callers (scripts, MSI) see failure
             return worst;
         }
         catch (Exception e)

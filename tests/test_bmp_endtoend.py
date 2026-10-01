@@ -1,3 +1,8 @@
+# portable-path header (see _paths.py); camera-box-only paths
+# keep their default under SN_CAM_BASE/SN_OUT overrides
+import _paths
+from _paths import VIEWER, APP_DIR, PCDRIVER, LIBUSB_DLL, BUILT_EXE, OUT, CAM_BASE  # noqa
+
 """End-to-end: drive the real _bmp over the captured frame sequence.
 
 Runs the actual method the viewer calls, on the real frames in capture order,
@@ -7,8 +12,7 @@ wall reference loaded.
 """
 import ast, os, pathlib, sys, time, types, numpy as np
 
-SRC = pathlib.Path(r"C:\a\src\app\viewer.py")
-OUT = pathlib.Path(r"C:\a\out")
+SRC = VIEWER
 
 ns = {"np": np, "time": time, "os": os, "MIN_WINDOW": 20.0, "BLEND": 0.6}
 src = SRC.read_text(encoding="utf-8")

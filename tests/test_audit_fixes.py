@@ -129,21 +129,24 @@ class TestInstallerSourceContract(unittest.TestCase):
         tail = "\n".join(lines[idx:idx + 8])
         self.assertNotIn("return 0;", tail)
 
-    def test_parent_node_not_bound(self):
+    def test_installer_uses_pnputil_no_wdi(self):
+        """The old installer shelled wdi-simple.exe, which was never shipped
+        anywhere - every install silently broke. It now stages the INF via
+        pnputil directly (audit batch 3)."""
         src = self._src()
-        # exactly the two composite interfaces; no parent bind
-        self.assertEqual(src.count('-i 0 -t 0 -l 0'), 1)
-        self.assertEqual(src.count('-i 1 -t 0 -l 0'), 1)
-        self.assertNotIn("-t 0 -l 0\",\n", src.replace(
-            '-i 0 -t 0 -l 0', '').replace('-i 1 -t 0 -l 0', ''))
-        # and the constraint is documented
-        self.assertIn("parent node", src)
+        self.assertNotRegex(src, r'wdi-simple\.exe"|\bwdi_simple|\bwdi_simple\.exe')
+        self.assertIn('"pnputil"', src)
+        self.assertIn("return worst;", src)
+
+    def test_parent_node_not_bound(self):
+        # parent USB node must stay unbound, and the constraint documented
+        self.assertIn("NOT bound", self._src())
 
     def test_inf_comment_and_installer_agree(self):
         inf = open(os.path.join(REPO, "driver", "seeknano.inf"),
                    encoding="utf-8", errors="replace").read()
         self.assertIn("deliberately NOT bound", inf)
-        self.assertIn("parent node", self._src())
+        self.assertIn("NOT bound", self._src())
 
 
 class TestCTransportGuards(unittest.TestCase):

@@ -1,3 +1,8 @@
+# portable-path header (see _paths.py); camera-box-only paths
+# keep their default under SN_CAM_BASE/SN_OUT overrides
+import _paths
+from _paths import VIEWER, APP_DIR, PCDRIVER, LIBUSB_DLL, BUILT_EXE, OUT, CAM_BASE  # noqa
+
 """Defective elements must be found and replaced, and only they.
 
 The reported artefact was 3-4 small bright spots that stayed in the same place
@@ -22,7 +27,7 @@ import re
 
 import numpy as np
 
-SRC = pathlib.Path(r"C:\a\src\app\viewer.py")
+SRC = VIEWER
 TEXT = SRC.read_text(encoding="utf-8")
 tree = ast.parse(TEXT)
 ns = {"np": np}

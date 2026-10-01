@@ -1,3 +1,8 @@
+# portable-path header (see _paths.py); camera-box-only paths
+# keep their default under SN_CAM_BASE/SN_OUT overrides
+import _paths
+from _paths import VIEWER, APP_DIR, PCDRIVER, LIBUSB_DLL, BUILT_EXE, OUT, CAM_BASE  # noqa
+
 """Hot-spot detection must be selective, tunable, and honest about its limits.
 
 The camera is currently unplugged, so this drives the real module on synthetic
@@ -13,7 +18,7 @@ import sys
 import numpy as np
 from PIL import Image
 
-sys.path.insert(0, r"C:\a\src\app")
+sys.path.insert(0, str(APP_DIR))
 import hotspot as hs
 
 FAIL = []
@@ -133,7 +138,7 @@ for tex in (0, 60, 160):
 check(worst < 0.020, "worst case %.2f ms per call, budget 40 ms" % (worst * 1000))
 
 print("\n10b. on the real burst frames the viewer wrote")
-shots = sorted(pathlib.Path(r"C:\a").glob("burst_*.png"))
+shots = sorted(OUT.glob("burst_*.png"))
 if not shots:
     print("   (skipped - no burst PNGs present)")
 else:
@@ -169,10 +174,10 @@ print("\n12. drawing survives regions on every edge and corner")
 # A region touching the bottom or right edge made the marker box ask for row
 # 240 of a 240-row frame and lost the entire paint. Caught in
 # seeknano_crash.log as an IndexError, not by any test - so it gets one now.
-sys.path.insert(0, r"C:\a\src\app")
+sys.path.insert(0, str(APP_DIR))
 import ast
 import pathlib
-_src = pathlib.Path(r"C:\a\src\app\viewer.py").read_text(encoding="utf-8")
+_src = VIEWER.read_text(encoding="utf-8")
 _tree = ast.parse(_src)
 _ns = {"np": np, "time": __import__("time")}
 # The extracted methods reference module constants, so they have to come along

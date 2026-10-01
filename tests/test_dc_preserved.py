@@ -1,4 +1,9 @@
-﻿"""Regression guard: the DC level must be preserved by the NUC.
+# portable-path header (see _paths.py); camera-box-only paths
+# keep their default under SN_CAM_BASE/SN_OUT overrides
+import _paths
+from _paths import VIEWER, APP_DIR, PCDRIVER, LIBUSB_DLL, BUILT_EXE, OUT, CAM_BASE  # noqa
+
+"""Regression guard: the DC level must be preserved by the NUC.
 
 Bug found on live hardware 2026-09-29: _nuc2d ended with
     return img - corr + img.mean()
@@ -9,7 +14,7 @@ This test fails if the additive term ever comes back.
 """
 import ast, pathlib, numpy as np
 
-src = (pathlib.Path(r"C:\a\src\app\viewer.py")).read_text(encoding="utf-8")
+src = (VIEWER).read_text(encoding="utf-8")
 ns = {"np": np}
 for n in ast.parse(src).body:
     if isinstance(n, ast.FunctionDef) and n.name in {"_boxblur", "_nuc2d"}:
