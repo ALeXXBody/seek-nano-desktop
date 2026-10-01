@@ -40,7 +40,8 @@ nodes = {}
 for cls in (n for n in ast.parse(src).body if isinstance(n, ast.ClassDef)):
     for n in cls.body:
         if isinstance(n, ast.FunctionDef) and n.name in {
-                "_bmp", "_process", "_overlay", "_text", "_validate_ffc"}:
+                "_bmp", "_process", "_overlay", "_text", "_validate_ffc",
+                "_detect_spots", "_draw_hotspots"}:
             nodes[n.name] = n
 assert "_bmp" in nodes, "_bmp not found"
 mod = ast.Module(body=list(nodes.values()), type_ignores=[])
@@ -76,6 +77,12 @@ class Panel:
         self.bg_gains = []
         self.bg_hp = None
         self.bad = None
+        self.spots = []
+        self.spot_mode = "off"
+        self.spot_sens = 1.0
+        self.spot_hist = []
+        self.spot_alarm = 0.0
+        self.spot_alarm_on = False
         self.shown_frames = 0
         self.held_gain = 0
         self.saturated = 0
@@ -102,6 +109,8 @@ Panel._process = ns["_process"]
 Panel._overlay = ns["_overlay"]
 Panel._text = ns["_text"]
 Panel._validate_ffc = ns["_validate_ffc"]
+Panel._detect_spots = ns["_detect_spots"]
+Panel._draw_hotspots = ns["_draw_hotspots"]
 Panel.ffc_ok = None
 Panel.ffc_gain = None
 ns["wx"] = FakeWx

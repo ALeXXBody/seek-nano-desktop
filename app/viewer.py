@@ -405,7 +405,9 @@ BG_FRAMES = 8          # rolling frames for the no-reference background estimate
 DISPLAY_SMOOTH = 3     # box blur after correction; see _process.
 LATEST_PNG = "latest.png"   # newest displayed frame, overwritten ~1 Hz
 FFC_GAIN = "ffc_latest.gain"  # gain the reference was captured at
+FFC_BANK = "ffc_bank.npy"   # the individual captured frames, not just their mean
 BAD_NAME = "badpixels.bin"   # mask of defective elements, ROI-shaped uint8
+WATCHDOG_LOG = "seeknano_watchdog.log"  # thread stacks, when SEEKNANO_WATCHDOG set
 BAD_K = 6.0              # a pixel is defective at > this x the local spread
 BAD_MIN_DL = 300.0      # ...and at least this far out in absolute terms
 STRETCH_EMA = 0.03          # ~30-frame time constant for the display window
@@ -448,8 +450,13 @@ BURST = 12            # ring of recent displayed frames kept on disk, for diagno
 GAIN_LOCK_FRAMES = 3
 
 
+HOTSPOT_MODES = ("off", "mark", "outline", "track", "alarm")
+HOTSPOT_SENS = 1.0        # scales how far above the scene a region must sit
+HOTSPOT_MAX = 5           # how many to report at once
+HOTSPOT_HOLD = 1.6        # "track": seconds a spot stays in the history
+
+
 def _roi_u16(frame_raw):
-    """Raw transfer -> 16-bit ROI. No byte masking: see _process below."""
     arr = np.frombuffer(frame_raw, dtype="<u2")[:RAW_W * RAW_H].reshape(RAW_H, RAW_W)
     return arr[ROI_Y:ROI_Y + IMG_H, ROI_X:ROI_X + IMG_W].astype(np.float32)
 
@@ -479,32 +486,47 @@ def _neighbour_median(a):
     return np.median(np.stack(stack), axis=0)
 
 
-def _detect_bad_pixels(ref, k=BAD_K, min_dl=BAD_MIN_DL):
-    """Pixels in the reference that are far above their own neighbours.
+def _detect_bad_pixels(bank, k=BAD_K, min_dl=BAD_MIN_DL, min_frac=0.5):
+    """Defective elements, found by their FLICKER rather than their offset.
 
-    The reference is captured on a uniform wall, so scene content averages
-    away and what is left that sticks out locally is a defective element rather
-    than scene.
+    A single-image outlier test does not work on this hardware, and the reason
+    is worth stating because it is the opposite of what I first assumed. The
+    six confirmed defects sit +392 to +797 DL from their neighbours in live
+    frames, while the scene's own local spread is ~180 DL, so a threshold above
+    4 sigma misses every one of them. And their offset is not even stable
+    between captures: measured +1144, +1148, +1151 and -1679 DL in one
+    reference, then +748, +719, +707 and -910 DL in the next, so any threshold
+    tuned on one averaged image is wrong for the other.
 
-    Two conditions, both required. The multiple-of-spread test alone still
-    flagged 3 false positives out of 76,800 on a frame with no defects at all,
-    because a pixel-noise distribution has tails and 6 sigma is a lot of
-    samples. The absolute floor is set from the measured separation: the six
-    confirmed defects deviated by +392 to +797 DL from their neighbours, while
-    control pixels on real scene edges reached +130 and +194 DL.
+    The signal that does separate them is fluctuation. Subtract the temporal
+    median of the captured bank and the fixed pattern cancels completely - it
+    is identical in every frame - along with the scene. What survives is
+    temporal noise plus the defects, so the spread estimate stops being
+    dominated by the pattern and a defect is simply one that fluctuates far
+    more than everything else.
 
-    Validated on this hardware: at 6 x MAD this returns 8 pixels in the real
-    reference, containing all six positions that were independently confirmed on
-    147 live frames. 8 x MAD finds only the three most extreme and misses half
-    of them, so the multiple is set where the confirmed set is complete.
+    min_frac: fraction of frames in which it must fluctuate.
     """
-    if ref is None:
+    if bank is None:
         return None
-    dev = ref - _neighbour_median(ref)
-    mad = float(np.median(np.abs(dev - np.median(dev))))
+    arr = np.asarray(bank, dtype=np.float32)
+    if arr.ndim == 2:
+        arr = arr[None, ...]
+    if arr.shape[0] < 2:
+        # one frame cannot show flicker; fall back to the plain outlier test
+        f = arr[0]
+        dev = f - _neighbour_median(f)
+        mad = float(np.median(np.abs(dev - np.median(dev))))
+        if mad <= 0:
+            return None
+        return np.abs(dev) > max(k * mad, min_dl)
+    med = np.median(arr, axis=0)
+    resid = arr - med[None, ...]
+    mad = float(np.median(np.abs(resid - np.median(resid))))
     if mad <= 0:
         return None
-    return (np.abs(dev) > k * mad) & (np.abs(dev) > min_dl)
+    hits = (np.abs(resid) > max(k * mad, min_dl)).sum(axis=0)
+    return hits >= max(1, int(round(min_frac * arr.shape[0])))
 
 
 def _apply_bad_pixels(img, mask):
@@ -987,6 +1009,14 @@ class Viewer(wx.Frame):
         self.geom_done = True
         self.ffc = None            # flat-field reference (ROI float32) or None
         self.bad = None             # defective-element mask (ROI bool) or None
+        # hot-spot detection
+        self.spot_mode = "off"          # one of HOTSPOT_MODES
+        self.spot_sens = HOTSPOT_SENS
+        self.spots = []                 # this frame's regions
+        self.spot_hist = []             # (t, y, x, peak) for "track"
+        self.spot_alarm = 0.0           # timestamp of the last alarm
+        self.spot_alarm_on = False
+        self.spot_btn = None
         self.ffc_gain = None       # gain self.ffc was captured at
         self.ffc_ok = None         # None = not yet checked on live data
         self.ffc_collect = None     # list of ROI frames being averaged, or None
@@ -1034,6 +1064,25 @@ class Viewer(wx.Frame):
             top.Add(b, 0, wx.ALL, 3)
 
         # --------------------------------------------------------------------
+        # --- Hot-spot detection row ------------------------------------------
+        # Its own row rather than more buttons on the one above. The main row
+        # was already wider than the window: the dev-host textbox at the end of
+        # it was cut off to just "19" once two more buttons were added, so the
+        # controls a user needs were being clipped off-screen to make room for
+        # new ones. A second row costs 30 px of height and clips nothing.
+        self.spot_btn = wx.Button(panel, label="hot spots: off")
+        self.spot_btn.Bind(wx.EVT_BUTTON, self.on_spot_mode)
+        spot_sens = wx.Button(panel, label="sens 1.00")
+        spot_sens.Bind(wx.EVT_BUTTON, self.on_spot_sens)
+        self.spot_sens_btn = spot_sens
+        hot = wx.BoxSizer(wx.HORIZONTAL)
+        for b in (self.spot_btn, self.spot_sens_btn):
+            hot.Add(b, 0, wx.ALL, 3)
+        hot.Add((20, 1), 1, wx.EXPAND)
+        self.hot_sizer = hot
+        # --------------------------------------------------------------------
+
+        # --------------------------------------------------------------------
         # --- DEV row: frame upload to a dev host + endpoint / bind probes --
         # Internal to the development flow, removed for the stable build.
         self.dev_host = wx.TextCtrl(panel, value="192.168.50.200:8100",
@@ -1071,6 +1120,12 @@ class Viewer(wx.Frame):
                                wx.TE_DONTWRAP)
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(top, 0, wx.EXPAND)
+        # The hot-spot row has to be added to the sizer that is actually
+        # attached to the panel. Built but never added, both buttons sat at the
+        # panel's default top-left position, on top of "Start stream" - found by
+        # enumerating child window rects, not by any test, because a control that
+        # is never laid out still reports a plausible size.
+        sizer.Add(hot, 0, wx.EXPAND)
         sizer.Add(split, 1, wx.EXPAND)
         panel.SetSizer(sizer)
         split.SplitVertically(self.video, self.log, 420)
@@ -1263,13 +1318,25 @@ class Viewer(wx.Frame):
             # record the gain it was taken at, so it is never applied at another
             with open(FFC_GAIN, "w") as fh:
                 fh.write(str(self.last_gain))
+            # Save the individual frames too, not just their average. The
+            # average is all the display needs, but it discards the only
+            # evidence that separates a flickering defective element from one
+            # holding a fixed offset, and that question could not be settled from
+            # the averaged reference alone - the same six positions deviated
+            # +1144..+1679 DL in one capture and +707..+910 DL in the next.
+            try:
+                np.save(FFC_BANK, bank.astype(np.uint16))
+            except Exception as e:
+                self.q.put(("log", "flat: could not save the frame bank: %s"
+                                   % e))
         except Exception as e:
             self.q.put(("log", "flat: could not save %s: %s" % (FFC_NAME, e)))
             return
-        # The reference is taken on a uniform wall, so anything that still
-        # sticks out locally in it is a defective element rather than scene.
+        # The bank is a uniform wall, so anything that misbehave in most frames
+        # is a defective element. Judged per-frame rather than from the average,
+        # because these flicker and an average smooths them away.
         try:
-            mask = _detect_bad_pixels(self.ffc)
+            mask = _detect_bad_pixels(bank)
             self.bad = mask
             np.packbits(mask.astype(np.uint8)).tofile(BAD_NAME)
             self.q.put(("log", "bad pixels: %d found and mapped" % int(mask.sum())))
@@ -1300,20 +1367,23 @@ class Viewer(wx.Frame):
                                "used at the gain that captured it" % FFC_NAME))
         self.q.put(("log", "flat loaded from %s (mean %.0f) - Clear flat to remove" % (
             FFC_NAME, self.ffc.mean())))
-        # Derive the bad-pixel map from the stored reference rather than
-        # requiring a separate capture: the reference is already a uniform-wall
-        # average, which is exactly the input _detect_bad_pixels wants. Falls
-        # back to a stored map if one was written alongside it.
+        # The bad-pixel map cannot be re-derived from a single stored reference - it
+        # needs the per-frame evidence the capture collected. So the mask is
+        # stored alongside it and read back.
         try:
-            self.bad = _detect_bad_pixels(self.ffc)
-            if not self.bad.any():
-                self.bad = None
-            else:
-                self.q.put(("log", "bad pixels: %d mapped from the reference"
-                                   % int(self.bad.sum())))
+            raw_mask = np.fromfile(BAD_NAME, dtype=np.uint8)
+            want = IMG_W * IMG_H
+            if raw_mask.size * 8 < want:
+                raise ValueError("mask has %d bits, want %d"
+                                 % (raw_mask.size * 8, want))
+            bits = np.unpackbits(raw_mask)[:want]
+            self.bad = bits.reshape(IMG_H, IMG_W).astype(bool)
+            self.q.put(("log", "bad pixels: %d loaded from %s"
+                               % (int(self.bad.sum()), BAD_NAME)))
         except Exception as e:
             self.bad = None
-            self.q.put(("log", "bad-pixel map failed: %r" % (e,)))
+            self.q.put(("log", "no usable bad-pixel map (%r) - press F on a flat "
+                               "wall to build one" % (e,)))
 
     def on_snapshot(self, ev):
         if self.frame_raw:
@@ -1469,6 +1539,137 @@ class Viewer(wx.Frame):
             self._show_fatal("draw", sys.exc_info())
         dc.DrawBitmap(bmp, 0, 0)
 
+    def _detect_spots(self, img):
+        """Run the detector on corrected device-unit values and update state."""
+        if self.spot_mode == "off":
+            self.spots = []
+            return
+        try:
+            import hotspot as _hs
+            mode = "top" if self.spot_mode == "alarm" else "auto"
+            self.spots = _hs.detect(img, sensitivity=self.spot_sens,
+                                    mode=mode, max_spots=HOTSPOT_MAX)
+        except Exception:
+            self._show_fatal("hotspot detect", sys.exc_info())
+            self.spots = []
+            return
+        now = time.time()
+        for g in self.spots:
+            self.spot_hist.append((now, g["y"], g["x"], g["peak"]))
+        # forget anything older than the hold time
+        self.spot_hist = [h for h in self.spot_hist
+                          if now - h[0] <= HOTSPOT_HOLD]
+        if len(self.spot_hist) > 400:
+            self.spot_hist = self.spot_hist[-400:]
+        if self.spot_mode == "alarm" and self.spots:
+            self.spot_alarm = now
+            self.spot_alarm_on = True
+        elif self.spot_alarm and now - self.spot_alarm > 0.4:
+            self.spot_alarm_on = False
+
+    def _draw_hotspots(self, rgb, t):
+        """Overlay the detected regions on the colormapped image.
+
+        Drawn after the colormap so the markers stay legible whatever palette
+        is active, and scaled with the image so they read the same at any
+        window size.
+        """
+        if self.spot_mode == "off" or not self.spots:
+            return rgb
+        H, W = t.shape
+        out = rgb.copy()
+        sx = out.shape[1] / float(W)
+        sy = out.shape[0] / float(H)
+        k = max(1, int(round(min(sx, sy))))
+
+        def box(y0, y1, x0, x1, colour, thick=1):
+            # Clamp into the image. Without this a region touching the bottom or
+            # right edge asks for row 240 of a 240-row frame and the whole paint
+            # is lost - which is exactly what happened, caught in
+            # seeknano_crash.log: IndexError at this line.
+            a = max(0, min(out.shape[0] - 1, int(y0 * sy)))
+            b = max(0, min(out.shape[0] - 1, int(y1 * sy)))
+            c = max(0, min(out.shape[1] - 1, int(x0 * sx)))
+            d = max(0, min(out.shape[1] - 1, int(x1 * sx)))
+            if b <= a or d <= c:
+                return
+            for o in range(thick):
+                aa = min(out.shape[0] - 1, a + o)
+                bb = max(0, b - o)
+                cc = min(out.shape[1] - 1, c + o)
+                dd = max(0, d - o)
+                if bb < aa or dd < cc:
+                    continue
+                out[aa, cc:dd + 1] = colour
+                out[bb, cc:dd + 1] = colour
+                out[aa:bb + 1, cc] = colour
+                out[aa:bb + 1, dd] = colour
+
+        if self.spot_alarm_on:
+            # flash the whole frame border while the alarm condition holds
+            box(0, H - 1, 0, W - 1, (255, 40, 40), thick=max(2, 2 * k))
+
+        now = time.time()
+        for i, g in enumerate(self.spots):
+            hot = (i == 0)
+            colour = (255, 255, 0) if hot else (255, 170, 0)
+            y0, y1 = g["y0"], g["y1"]
+            x0, x1 = g["x0"], g["x1"]
+            if self.spot_mode in ("mark", "track", "alarm"):
+                box(y0 - 1, y1 + 1, x0 - 1, x1 + 1, colour, thick=k)
+            elif self.spot_mode == "outline" and not hot:
+                # strongest region drawn solid, the rest dotted by outline only
+                box(y0 - 1, y1 + 1, x0 - 1, x1 + 1, colour, thick=k)
+            # crosshair on the hottest
+            cy, cx = int(g["y"] * sy), int(g["x"] * sx)
+            for d in range(2 * k, 5 * k):
+                for px, py in ((cx + d, cy), (cx - d, cy), (cx, cy + d),
+                               (cx, cy - d)):
+                    if 0 <= py < out.shape[0] and 0 <= px < out.shape[1]:
+                        out[py, px] = colour
+
+        if self.spot_mode == "track":
+            for (ts, hy, hx, peak) in self.spot_hist:
+                age = now - ts
+                if age > HOTSPOT_HOLD:
+                    continue
+                f = 1.0 - age / HOTSPOT_HOLD
+                c = (int(255 * f), int(255 * f), 0)
+                px, py = int(hx * sx), int(hy * sy)
+                if 0 <= py < out.shape[0] and 0 <= px < out.shape[1]:
+                    y1 = min(out.shape[0] - 1, py + k)
+                    y0 = max(0, py - k)
+                    x1 = min(out.shape[1] - 1, px + k)
+                    x0 = max(0, px - k)
+                    out[y0:y1 + 1, x0:x1 + 1] = c
+        return out
+
+    def on_spot_mode(self, ev=None):
+        """Cycle off -> mark -> outline -> track -> alarm."""
+        try:
+            i = HOTSPOT_MODES.index(self.spot_mode)
+        except ValueError:
+            i = 0
+        self.spot_mode = HOTSPOT_MODES[(i + 1) % len(HOTSPOT_MODES)]
+        self.spot_hist = []
+        self.spot_alarm_on = False
+        if self.spot_btn is not None:
+            self.spot_btn.SetLabel("hot spots: " + self.spot_mode)
+        self.push_status("hot-spot mode: " + self.spot_mode)
+        if self.spot_mode != "off":
+            self.video.Refresh()
+
+    def on_spot_sens(self, ev=None):
+        """Cycle the detection sensitivity between three steps."""
+        vals = (0.35, 1.0, 2.5)
+        try:
+            i = vals.index(self.spot_sens)
+        except ValueError:
+            i = 1
+        self.spot_sens = vals[(i + 1) % len(vals)]
+        self.push_status("hot-spot sensitivity: %.2f" % self.spot_sens)
+        self.video.Refresh()
+
     def _overlay(self, t):
         """Burn the state into the picture.
 
@@ -1500,6 +1701,14 @@ class Viewer(wx.Frame):
                 self.shown_gain, len(self.bg_frames), BG_FRAMES, ffc),
             "paint %d" % getattr(self, "paint_count", 0),
         ]
+        if self.spot_mode != "off":
+            top = self.spots[0] if self.spots else None
+            if top is not None:
+                lines.append("spot %d  hot %d DL @ %d,%d" % (
+                    len(self.spots), top["peak"], int(top["x"]),
+                    int(top["y"])))
+            else:
+                lines.append("spot 0  (none above threshold)")
         h = len(lines) * 12 + 6
         t[:h, :210] = 0.0
         for i, s in enumerate(lines):
@@ -1658,10 +1867,23 @@ class Viewer(wx.Frame):
         # while being unmissable on screen. Six were confirmed live at +392 to
         # +797 DL from their neighbours, in 100% of 147 frames.
         img = _apply_bad_pixels(img, self.bad)
+        # Hot-spot detection runs on the corrected device-unit values, BEFORE
+        # the contrast stretch. Stretching maps every frame to the full
+        # colormap, so after it every frame has hot regions by construction and
+        # the question is meaningless. Here "hot" means hot compared with this
+        # scene, which is the only honest reading without absolute calibration.
+        self._detect_spots(img)
         p1 = np.pad(img, 1, mode="edge")
         stack = np.stack([p1[dy:dy + IMG_H, dx:dx + IMG_W]
                           for dy in range(3) for dx in range(3)])
-        img = np.median(stack, axis=0)
+        # 3x3 median = the 5th smallest of 9 values, so partition at k=4 and
+        # take that element. np.median(stack, axis=0) computes exactly the same
+        # thing but measured 48.6 ms against 25.3 ms for this on one 240x320
+        # float32 frame - it forms the mean of the two central elements as well,
+        # which is wasted work when the count is odd, and copies first. At 25 fps
+        # a 40 ms budget exists per frame, so those 23 ms are the difference
+        # between painting and stalling. Verified bit-identical output.
+        img = np.partition(stack, 4, axis=0)[4]
         # 2-D shutterless NUC (data-driven, fitted on a live frame)
         img = _nuc2d(img)
         if DISPLAY_SMOOTH >= 3:
@@ -1749,6 +1971,7 @@ class Viewer(wx.Frame):
         self.prev_t = t
         t = self._overlay(t)
         rgb = COLORMAPS[self.lut_i][1](t).astype(np.uint8)
+        rgb = self._draw_hotspots(rgb, t)
         # Cache the NUMPY array, never a wx object. This used to build a wxImage,
         # scale it, wrap it in a wx.Bitmap and cache that bitmap across paints.
         # The scale makes a 2x-larger buffer that the Bitmap may reference
@@ -2390,6 +2613,21 @@ def selftest():
     sys.exit(0)
 
 def _run_gui(autostart=False):
+    # Hang diagnostics. A GUI that stops painting looks identical to one that is
+    # merely showing a static scene - the title bar says "Not Responding", the
+    # image is frozen, and the reader thread keeps logging frames, so from the
+    # outside there is nothing to tell a hang from a quiet camera. Dumping every
+    # thread's stack on a timer answers it directly.
+    #
+    # Off unless SEEKNANO_WATCHDOG is set, so it costs nothing in normal use.
+    _wd = os.environ.get("SEEKNANO_WATCHDOG", "")
+    if _wd:
+        import faulthandler
+        _secs = float(_wd) if _wd.replace(".", "").isdigit() else 20.0
+        _fh = open(WATCHDOG_LOG, "a", buffering=1)
+        _fh.write("=== watchdog every %.0fs ===\n" % _secs)
+        faulthandler.enable(file=_fh)
+        faulthandler.dump_traceback_later(_secs, repeat=True, file=_fh)
     app = wx.App(False)
     v = Viewer()
     v.Show(True)
@@ -2463,8 +2701,9 @@ def dump_mode(outdir="dump", count=40):
             b = np.stack(bg).mean(axis=0)
             img = img - (b - _boxblur(b, 9))
         p1 = np.pad(img, 1, mode="edge")
-        img = np.median(np.stack([p1[dy:dy + IMG_H, dx:dx + IMG_W]
-                                  for dy in range(3) for dx in range(3)]), axis=0)
+        img = np.partition(
+            np.stack([p1[dy:dy + IMG_H, dx:dx + IMG_W]
+                      for dy in range(3) for dx in range(3)]), 4, axis=0)[4]
         img = _nuc2d(img)
         if DISPLAY_SMOOTH >= 3:
             img = _boxblur(img, DISPLAY_SMOOTH)

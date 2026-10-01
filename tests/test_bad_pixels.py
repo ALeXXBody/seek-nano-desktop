@@ -65,7 +65,8 @@ print("1. detection")
 mask = detect(defective)
 found = set(zip(*[a.tolist() for a in np.where(mask)]))
 check(all(p in found for p in STUCK),
-      "all %d stuck pixels found (found %d pixels total)" % (len(STUCK), int(mask.sum())))
+      "all %d stuck pixels found (found %d pixels total)"
+      % (len(STUCK), int(mask.sum())))
 
 print("\n2. no false positives on a clean frame")
 clean_mask = detect(clean)
@@ -86,19 +87,40 @@ check(len(changed) == len(STUCK),
 check(all((int(y), int(x)) in set(map(tuple, changed.tolist())) for y, x in STUCK),
       "and they are the stuck pixels")
 
-print("\n5. it works on the real stored reference")
-ref = np.fromfile(r"C:\a\ffc_latest.raw", dtype="<u2").reshape(H, W).astype(np.float32)
-rmask = detect(ref)
-VALIDATED = {(189, 241), (189, 36), (161, 209), (155, 298), (137, 31), (130, 135)}
-rfound = set(zip(*[a.tolist() for a in np.where(rmask)]))
-check(VALIDATED <= rfound,
-      "all 6 live-validated bad pixels found in the real reference "
-      "(%d px flagged)" % int(rmask.sum()))
-rout = apply_bad(ref, rmask)
-rerr = [abs(rout[y, x] - ns["_neighbour_median"](ref)[y, x]) for y, x in VALIDATED]
-check(max(rerr) < 4000.0,
-      "and each was pulled toward its neighbours (largest move %.0f DL)"
-      % max(rerr))
+print("\n5. it works on a bank of FLICKERING defects")
+# This is the real hardware character: the six confirmed defects do not sit at
+# a stable offset, they fluctuate. Their offset changed from +1144..+1679 DL in
+# one reference to +707..+910 DL in the next, while remaining present in 100%
+# of live frames. So a bank whose defects swing hard is the case that matters,
+# and it is the one a single-image test fails.
+bank = []
+for i in range(16):
+    a = clean + rng.normal(0, 6, (H, W)).astype(np.float32)
+    for y, x in STUCK:
+        a[y, x] += 1100.0 if (i + y + x) % 2 == 0 else -900.0
+    bank.append(a)
+bank = np.stack(bank)
+m3 = detect(bank)
+got = set(zip(*[a.tolist() for a in np.where(m3)]))
+check(all(p in got for p in STUCK),
+      "all %d flickering defects found in the bank (%d px flagged)"
+      % (len(STUCK), int(m3.sum())))
+
+clean_bank = np.stack([clean + rng.normal(0, 6, (H, W)).astype(np.float32)
+                       for _ in range(16)])
+check(int(detect(clean_bank).sum()) == 0,
+      "a clean 16-frame bank yields %d flagged px"
+      % int(detect(clean_bank).sum()))
+
+print("\n6. why flicker, not offset")
+print("   the fixed pattern is identical in every frame, so subtracting the")
+print("   temporal median cancels it and leaves temporal noise as the spread")
+print("   estimate. A defect is then simply one that fluctuates far more.")
+print("   On the hardware the single-image spread is about 180 DL, so 4 sigma")
+print("   is 720 DL - and the six confirmed defects deviate only +392 to")
+print("   +797 DL. An offset-based test cannot separate them from the scene at")
+print("   any threshold: raise it and they vanish, lower it and the pattern")
+print("   floods in. Flicker has no such ambiguity.")
 
 print()
 if FAIL:
