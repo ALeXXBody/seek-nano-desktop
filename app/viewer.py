@@ -680,8 +680,13 @@ def dll_candidates(mei=None, exe_dir=None, module_dir=None):
     for extra in (exe_dir, module_dir):
         if extra:
             dirs.append(extra)
-    for dr in dirs:
-        pairs.extend((os.path.join(dr, n), p) for n, p in NAMES)
+    # name-major: for each dll, try every directory before its sibling. The
+    # evidence says seeknanousb.dll is the transport that delivers frames and
+    # seeknanodirect.dll lands on the silent MI_01 half - a dir-major order
+    # could bind the silent one whenever the good dll happens to sit in a
+    # later search dir (e.g. MEIPASS holds only SNLB).
+    for n, p in NAMES:
+        pairs.extend((os.path.join(dr, n), p) for dr in dirs)
     pairs.extend(NAMES)  # bare-name fallback last
     return pairs
 
@@ -737,7 +742,8 @@ class NativeStream(threading.Thread):
 
     def run(self):
         name, pfx, d = self.dll.k
-        if getattr(d, pfx + "open")() != 0:
+        rc = getattr(d, pfx + "open")()
+        if rc != 0:
             # This is EXPECTED on a libusbK-bound machine, not a fault. The
             # WinUSB DLL enumerates USB\VID_289D&PID_0011 by its WinUSB device
             # interface GUID; libusbK registers a different GUID, so SetupDi
@@ -745,6 +751,12 @@ class NativeStream(threading.Thread):
             # below talks to libusbK correctly and is the working transport
             # here, so say that rather than telling the user to go re-run a
             # driver installer that cannot help.
+            # rc=3/4: enumeration failure; 5: open failed; 6: winusb; 7: pipe
+            # policy; 8: already open (re-entry guard - a caller bug, do not
+            # mask it as a driver problem; log the code before falling back)
+            self.q.put(("log",
+                        "native open rc=%d (-2: device bound to libusbK; "
+                        "-8: already open)" % rc))
             self.q.put(("log",
                         "native WinUSB transport unavailable (device is bound to "
                         "libusbK, not WinUSB) - using the libusb-1.0 path, "
@@ -812,7 +824,7 @@ class Stream(threading.Thread):
             self.logf = open("seeknano_verbose.log", "a", buffering=1)
         except Exception:
             self.logf = None
-        # try: SEEKNANO_TRACE=1 re-enables the per-transfer handshake trace
+        # SEEKNANO_TRACE=1 re-enables the per-transfer handshake trace
         self.verbose = os.environ.get("SEEKNANO_TRACE", "") not in ("", "0")
 
     def trace(self, line, to_ui=False):
@@ -1968,12 +1980,18 @@ class Viewer(wx.Frame):
         return img
 
     def _bmp(self):
+        # display frame, NOT the pump's newest frame: while paused the pump
+        # keeps running but frame_raw changes underneath the cache key, and
+        # any stray paint event would run the full pipeline on live data -
+        # exactly the "paused but pulsing" bug. _display_raw is pinned by the
+        # tick handler and only follows frame_raw while running/unpausing.
+        disp = getattr(self, "_display_raw", self.frame_raw)
         cached = getattr(self, "_bmp_cache", None)
-        if cached and cached[0] == self.frame_raw:
+        if cached and cached[0] == disp:
             return cached[1]
-        if self.frame_raw is None:
+        if disp is None:
             return None
-        img = _roi_u16(self.frame_raw)
+        img = _roi_u16(disp)
         self._validate_ffc(img)
         img = self._process(img)
         # Display stretch. Recomputing the 2/98 percentiles every frame was the
@@ -2275,7 +2293,9 @@ class Viewer(wx.Frame):
                 if not self.paused:
                     # while paused the picture is frozen on purpose: skip
                     # the refresh and the display rebuild, the pump here
-                    # then costs only validation, not the image pipeline
+                    # then costs only validation, not the image pipeline.
+                    # _display_raw stays pinned to the last pre-pause frame
+                    self._display_raw = payload
                     self.video.Refresh()
                     # Build the display array HERE, on the timer, not in the
                     # paint handler. on_paint used to run the whole pipeline
@@ -2375,6 +2395,8 @@ class Viewer(wx.Frame):
             self.Close()
         elif ch == " " or space or name == "Pause":
             self.paused = not self.paused
+            if not self.paused:
+                self._display_raw = self.frame_raw
             self.push_status("paused" if self.paused else "running")
 
     def on_key(self, ev):
@@ -2399,6 +2421,8 @@ class Viewer(wx.Frame):
                 self.Close()
             elif c == " ":
                 self.paused = not self.paused
+                if not self.paused:
+                    self._display_raw = self.frame_raw
                 self.push_status("paused" if self.paused else "running")
             ev.Skip()
             return
@@ -2585,8 +2609,6 @@ def dev_serve(target_url="192.168.50.200:8100", frames_per_batch=3):
             break
         except Exception:
             continue
-        if name is not None:
-            break
     if name is None:
         say("dev: no native transport dll found next to SeekNano.exe ({})\n"
             "Download SeekNano-devbundle.zip from the release and extract "

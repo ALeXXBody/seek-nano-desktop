@@ -79,6 +79,8 @@ static int load_libusb(void)
         for (const wchar_t* p = dir; *p; p++)
             if (*p == L'\\' || *p == L'/') last = p;
         size_t dl = (size_t)(last - dir);
+        if (dl > MAX_PATH - 16)          /* space for "\\libusb-1.0.dll" */
+            dl = MAX_PATH - 16;
         lstrcpynW(full, dir, (int)dl + 1);
         lstrcatW(full, L"\\libusb-1.0.dll");
         g_libusb = LoadLibraryW(full);
@@ -264,7 +266,7 @@ __declspec(dllexport) int SNLB_get_frame(unsigned char* out)
     for (kick = 0; kick < 200; kick++) {
         if (c_out(0x53, 4, req) < 0) return -5;
         if (c_in(0x35, 4, req) < 0) return -6;
-        if (req[0] != 0 || req[1] != 0)
+        if (req[0] || req[1] || req[2] || req[3])
             break;
     }
     /* camera queues the frame around now; read it in device chunks */

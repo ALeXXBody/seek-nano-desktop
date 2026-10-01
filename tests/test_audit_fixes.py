@@ -178,5 +178,59 @@ class TestCTransportGuards(unittest.TestCase):
                          "each failure after LoadLibrary must FreeLibrary")
 
 
+class TestDisplayFreezeWhenPaused(unittest.TestCase):
+    """Regression: while paused, the newest pump frame must NOT be able to
+    reach the screen through a stray paint event. The shown frame is pinned
+    in _display_raw; _bmp reads that, not frame_raw."""
+
+    def _src(self):
+        return open(os.path.join(REPO, "app", "viewer.py"),
+                    encoding="utf-8").read()
+
+    def test_bmp_reads_display_raw(self):
+        src = self._src()
+        bmp = src[src.find("def _bmp"):]
+        self.assertIn("_display_raw", bmp)
+        self.assertIn("_roi_u16(disp)", bmp)
+
+    def test_pause_pins_frame(self):
+        src = self._src()
+        self.assertIn("self._display_raw = payload", src)
+
+    def test_unpause_resyncs_display(self):
+        src = self._src()
+        # both pause toggles must resync _display_raw when leaving pause
+        self.assertEqual(src.count("_display_raw = self.frame_raw"), 2)
+
+
+class TestDllCandidatesOrder(unittest.TestCase):
+    """name-major everywhere: a partial bundle must never bind the silent
+    SNLB transport just because it sits in an earlier search dir."""
+
+    def test_name_major_with_two_dirs(self):
+        mei, out = os.path.join("M", "x"), "E"
+        pairs = viewer.dll_candidates(mei=mei, exe_dir=out)
+        expect = [
+            (os.path.join(mei, "seeknanousb.dll"), "SN_"),
+            (os.path.join(out, "seeknanousb.dll"), "SN_"),
+            (os.path.join(mei, "seeknanodirect.dll"), "SNLB_"),
+            (os.path.join(out, "seeknanodirect.dll"), "SNLB_"),
+            ("seeknanousb.dll", "SN_"),
+            ("seeknanodirect.dll", "SNLB_"),
+        ]
+        self.assertEqual(pairs, expect)
+
+    def test_usb_always_before_direct(self):
+        pairs = viewer.dll_candidates(mei="M", exe_dir="E", module_dir="WD")
+        seen_pathed = [(path, p) for path, p in pairs
+                       if os.sep in path or "/" in path]
+        # every SN_ probed via a directory comes before every SNLB_ probed
+        # via a directory (bare-name fallbacks are all last, by design)
+        self.assertLess(max(i for i, (_, pref) in enumerate(seen_pathed)
+                            if pref == "SN_"),
+                        min(i for i, (path, pref) in enumerate(seen_pathed)
+                            if pref == "SNLB_"))
+
+
 if __name__ == "__main__":
     unittest.main()
