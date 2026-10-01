@@ -37,6 +37,10 @@ REQ_OUT = 0x40
 REQ_IN = 0xC0
 BULK_EP = 0x81
 FRAME_BYTES = 177_840
+# 6,840 B per read. Raising this to 32,768 to cut GIL churn against the main
+# thread was tried and reverted: the device then fails the transfer with
+# USBTimeoutError ([Errno 10060]) and the stream drops frames. Six reads of this
+# size per frame is the largest that reads reliably here.
 CHUNK = 6_840
 W, H = 320, 240
 VW, VH = W * 2, H * 2
@@ -764,8 +768,25 @@ class Stream(threading.Thread):
             kicks = 0
             fails = 0
             exchanged = 0
-            period = 0.040            # start optimistic: try the 25 fps spec
-            MIN_PERIOD, MAX_PERIOD = 0.040, 0.115
+            # No artificial pacing. This used to sleep to a 40..115 ms period
+            # and settle around 78 ms, which capped the app at 12.9 fps. That
+            # pacing was a guard against over-reading, and the guard is not
+            # needed: the bulk read BLOCKS until the camera has the frame, and
+            # measured on this hardware it waits 39.6 ms on average - which is
+            # precisely 1/25 fps. The read already paces the loop at the
+            # camera's own rate.
+            #
+            # Measured with the pacing removed: 150 kicks in 6.07 s, 150
+            # complete frames, 24.73 fps, not one short read. The kick payload
+            # is byte-identical to the phone app's (W 0x53 "WFsBAA==" =
+            # 58 5b 01 00), so this is the sensor's native rate, not something
+            # we were asking for and failing to get.
+            #
+            # Failure back-off is kept: it now starts from a 20 ms floor rather
+            # than from zero, so repeated failures still slow the loop down and
+            # then decay away again.
+            period = 0.0
+            MIN_PERIOD, MAX_PERIOD = 0.0, 0.115
             last_ok = time.time()
             while not self.stop_flag.is_set():
                 wait = period - (time.time() - last_ok)
@@ -865,7 +886,7 @@ class Stream(threading.Thread):
                         return
                     if fails <= 3:
                         time.sleep(0.1)
-                        period = min(MAX_PERIOD, period * 1.3)
+                        period = min(MAX_PERIOD, max(0.020, period * 1.3))
                     continue
                 if len(buf) >= FRAME_BYTES:
                     frame = _resync_frame(buf)
@@ -995,7 +1016,12 @@ class Viewer(wx.Frame):
 
         self.timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.tick, self.timer)
-        self.timer.Start(70)
+        # 33 ms = 30 Hz, not the 70 ms (14.3 Hz) this used to run at. The timer
+        # drains the frame queue, so it was the display's ceiling: even with the
+        # camera delivering 25 fps, a 70 ms tick could only ever show 14 of
+        # them. 30 Hz leaves headroom over 25 without flooding the paint path -
+        # a paint now costs ~1.5 ms (buffered, blit only).
+        self.timer.Start(33)
         self.Bind(wx.EVT_CLOSE, self.on_close)
         # The README documents s/c/p/d/q hotkeys but nothing ever bound them,
         # so pressing "p" did nothing at all. Bind them here, on the frame, and
@@ -1628,9 +1654,18 @@ class Viewer(wx.Frame):
             im = Image.fromarray(rgb)
             # Ring of recent displayed frames, overwritten in place. Everything
             # measurable from outside the app has come back "the data is
-            # stable", so keep what the DISPLAY actually produced at frame rate
-            # and let it be diffed directly.
-            if BURST:
+            # stable", so keep what the DISPLAY actually produced and let it be
+            # diffed directly.
+            #
+            # Throttled to 5 Hz. A PNG encode measured 8.00 ms and this was
+            # running once per accepted frame; at 26 fps that is 208 ms of
+            # main-thread time per second, and it was throttling the DISPLAY:
+            # the stream delivered 26.02 fps but paints only reached 11.33/s.
+            # The ring is a diagnostic, not the product, and the screen itself
+            # can now be captured directly (tests/screen_capture.py), so 5 Hz
+            # is ample.
+            if BURST and now - getattr(self, "_last_burst", 0.0) > 0.2:
+                self._last_burst = now
                 i = int(getattr(self, "_burst_i", 0)) % BURST
                 self._burst_i = i + 1
                 im.save("burst_%02d.png" % i)
@@ -1812,12 +1847,16 @@ class Viewer(wx.Frame):
                         "no wall reference yet - press F / 'Capture flat "
                         "(wall)' to remove the pattern")
                 if self.shown_frames % 50 == 0:
-                    self.log.AppendText(
-                        "  %d frames shown, %d rejected, %d held on gain, "
-                        "%d saturated, bg=%d/%d ffc=%s\n" % (
-                            self.shown_frames, self.bad_frames, self.held_gain,
-                            self.saturated, len(self.bg_frames), BG_FRAMES,
-                            "yes" if self.ffc is not None else "no"))
+                    # ALSO to the file. Panel-only meant that when frames
+                    # stopped being accepted, the counts that explain why
+                    # (rejected / held / saturated / which gain) were
+                    # unreachable from outside the app and the only visible
+                    # symptom was a frozen picture.
+                    self.q.put(("log", "%d shown, %d rejected, %d held, "
+                                       "%d saturated, gain=%s last_seq=%s"
+                                % (self.shown_frames, self.bad_frames,
+                                   self.held_gain, self.saturated, hdr[2],
+                                   hdr[1])))
                 self.frame_raw = payload
                 # which frame the screen will be showing after the next paint
                 self._paint_seq = hdr[1]
