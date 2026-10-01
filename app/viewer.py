@@ -138,11 +138,13 @@ def _frame_reason(frame_raw, prev_seq=None):
     return None
 
 
-MIN_SCENE_SPAN = 100.0   # DL, 1-99%; see _frame_has_content
+MIN_SCENE_SPAN = 100.0   # DL, 1-99%; below this the frame is flat, see below
+MAX_SCENE_SPAN = 5000.0  # DL, 1-99%; above this the frame is clipped
 
 
-def _frame_has_content(frame_raw, min_span=MIN_SCENE_SPAN):
-    """False for frames the camera sends while its gain saturates.
+def _frame_has_content(frame_raw, min_span=MIN_SCENE_SPAN,
+                       max_span=MAX_SCENE_SPAN):
+    """False for frames that are flat or blown out.
 
     The AGC cycle visits a gain-20 setting whose frames are essentially flat:
     measured 1-99% span 13..30 DL against ~1500 DL for a real frame, and std
@@ -151,12 +153,37 @@ def _frame_has_content(frame_raw, min_span=MIN_SCENE_SPAN):
     flashing the user reported. There is no picture in those frames to show, so
     the right thing is to keep the previous one.
 
-    The wall reference does not have this problem: a uniform wall genuinely is
-    flat, and it is never rendered - it is only used as the reference.
+    The bound has to work from BOTH sides. Measuring every gain the AGC visits
+    in one session:
+
+        gain   span DL    std DL   verdict
+           1      675.2     159.0   real picture
+           3      914.0     208.0   real picture
+           6      679.2     149.5   real picture
+           8     1252.0     278.3   real picture
+          27      754.0     139.4   real picture
+          28     1300.0     289.3   real picture
+           7       24.0       6.0   flat - no picture
+          20       24.0       5.8   flat - no picture
+          25       50.0      10.7   flat - no picture
+           4     9973.0    1246.7   CLIPPED
+           9    34178.4    8990.0   CLIPPED
+          14    65535.0   29694.6   CLIPPED
+          26    65532.0   10596.7   CLIPPED
+
+    The flat ones were already caught by the lower bound. The clipped ones were
+    NOT: a span of 65535 DL is the full 16-bit range, and the lower bound alone
+    passes them happily. They only avoided being displayed because the gain-hold
+    happened to reject them for being at an unfamiliar gain - the content gate
+    was never doing its job on its own. Anything that renders such a frame
+    stretches it across the whole colormap, i.e. a solid white flash.
+
+    5000 DL leaves better than 3x headroom over the widest real frame measured
+    (1300 DL), so an ordinary hot subject cannot trip it.
     """
     img = _roi_u16(frame_raw)
     span = float(np.percentile(img, 99) - np.percentile(img, 1))
-    return span >= min_span
+    return min_span <= span <= max_span
 
 
 def _gain_locked(gain, hist):
