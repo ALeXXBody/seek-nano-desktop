@@ -39,7 +39,7 @@ for n in ast.parse(src).body:
     elif isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "COLORMAPS":
         ns["COLORMAPS"] = [(e.elts[0].value, ns[e.elts[1].id]) for e in n.value.elts]
 
-want = {"tick", "_tick", "_show_fatal", "on_paint", "_draw_bitmap", "_bmp",
+want = {"tick", "_tick", "_show_fatal", "on_paint", "_bmp",
         "_process", "_save_png", "on_cmap"}
 nodes = []
 for cls in (n for n in ast.parse(src).body if isinstance(n, ast.ClassDef)):

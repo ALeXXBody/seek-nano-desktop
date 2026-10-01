@@ -404,6 +404,18 @@ FFC_GAIN = "ffc_latest.gain"  # gain the reference was captured at
 STRETCH_EMA = 0.03          # ~30-frame time constant for the display window
 MIN_WINDOW = 20.0     # DL; below this the display window is treated as collapsed
 WINDOW_MEDIAN = 9      # frames; median over these, so one outlier cannot steer it
+
+# Accelerator entry name -> the key it stands for. Needed because an
+# accelerator emits a CommandEvent with no key code; see _hotkey_run.
+ACCEL_KEY = {
+    "Start/stop stream": "s",
+    "Next colormap": "c",
+    "Save PNG snapshot": "p",
+    "Dump raw frame": "d",
+    "Capture flat (wall)": "f",
+    "Quit": "q",
+    "Pause": " ",
+}
 BLEND = 1.0           # temporal blend weight; 1.0 = off. See below.
 # The temporal blend was tried at 0.6 and measured 1.88x less frame-to-frame
 # movement on screen. It was reverted anyway: it ghosts whenever the scene
@@ -1254,15 +1266,34 @@ class Viewer(wx.Frame):
             except Exception:
                 pass
         dc = wx.PaintDC(self.video)
-        dc.SetBackground(wx.BLACK_BRUSH)
-        dc.Clear()
-        # Same reason as tick(): a throw here is invisible in a windowed build
-        # and shows up as a permanently black window.
+        # Build the bitmap BEFORE clearing. Clearing first and only then
+        # discovering there is nothing to draw leaves the window black, and it
+        # stays black until a frame arrives - which on screen is indistinguishable
+        # from the camera dropping out. Build first, clear only if we have
+        # something to put there, so a gap between frames keeps showing the last
+        # picture instead of flashing to black.
         try:
-            self._draw_bitmap(dc)
+            bmp = self._bmp()
         except Exception:
             self._show_fatal("paint", sys.exc_info())
-        return
+            return
+        if bmp is None:
+            self.blank_paints = getattr(self, "blank_paints", 0) + 1
+            if self.blank_paints in (1, 50, 500):
+                try:
+                    with open("seeknano_verbose.log", "a", buffering=1) as fh:
+                        fh.write("%.3f BLANK paint %d: no frame to draw "
+                                 "(shown %d, held %d, rej %d)\n"
+                                 % (time.time(), self.blank_paints,
+                                    getattr(self, "shown_frames", 0),
+                                    getattr(self, "held_gain", 0),
+                                    getattr(self, "bad_frames", 0)))
+                except Exception:
+                    pass
+            return
+        dc.SetBackground(wx.BLACK_BRUSH)
+        dc.Clear()
+        dc.DrawBitmap(bmp, 0, 0)
 
     def _overlay(self, t):
         """Burn the state into the picture.
@@ -1561,12 +1592,10 @@ class Viewer(wx.Frame):
         self._bmp_cache = (self.frame_raw, bmp)
         return bmp
 
-    def _draw_bitmap(self, dc):
-        bmp = self._bmp()
-        if bmp is None:
-            dc.SetPen(wx.Pen((30, 230, 255)) if hasattr(dc, "SetPen") else None)
-            return
-        dc.DrawBitmap(bmp, 0, 0)
+    # _draw_bitmap used to live here. It built the bitmap AFTER the caller had
+    # already cleared to black, so a frame that failed to build left the window
+    # solid black. on_paint now builds first and only clears when it has
+    # something to draw.
 
     # ---- tick ----
     def tick(self, ev):
@@ -1769,20 +1798,42 @@ class Viewer(wx.Frame):
         ev.Skip()
 
     def _hotkey_run(self, ev, name):
-        ch = chr(ev.GetKeyCode()) if ev.GetKeyCode() < 256 else ""
-        if ch.lower() == "s":
+        """Dispatch one hotkey.
+
+        Reached two ways, and they do NOT carry the same event:
+
+          * the frame accelerator table emits a wx.CommandEvent, which has no
+            GetKeyCode - the action is already known from the table entry
+          * the CHAR_HOOK fallback emits a wx.KeyEvent, which does
+
+        Calling GetKeyCode() unconditionally threw AttributeError on every
+        accelerator press, i.e. every hotkey silently did nothing and wrote a
+        traceback to seeknano_crash.log. So take the key from the event when it
+        has one, and otherwise from the accelerator entry's name.
+        """
+        ch = ""
+        escape = space = False
+        if hasattr(ev, "GetKeyCode"):
+            k = ev.GetKeyCode()
+            ch = chr(k) if 0 < k < 256 else ""
+            escape = k == wx.WXK_ESCAPE
+            space = k == wx.WXK_SPACE
+        else:
+            ch = ACCEL_KEY.get(name, "")
+        key = ch.lower() if ch else ""
+        if key == "s":
             self.on_toggle(None)
-        elif ch.lower() == "c":
+        elif key == "c":
             self.on_cmap(None)
-        elif ch.lower() == "p":
+        elif key == "p":
             self.on_snapshot(None)
-        elif ch.lower() == "d":
+        elif key == "d":
             self.on_raw(None)
-        elif ch.lower() == "f":
+        elif key == "f":
             self.on_capture_flat(None)
-        elif ch.lower() == "q" or ev.GetKeyCode() == wx.WXK_ESCAPE:
+        elif key == "q" or escape:
             self.Close()
-        elif ch == " " or ev.GetKeyCode() == wx.WXK_SPACE:
+        elif ch == " " or space or name == "Pause":
             self.paused = not self.paused
             self.push_status("paused" if self.paused else "running")
 

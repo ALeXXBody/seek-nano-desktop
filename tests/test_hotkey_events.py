@@ -1,0 +1,152 @@
+"""Hotkeys must work from BOTH event kinds, and paint must never black out.
+
+Two regressions this pins down:
+
+1. The frame accelerator table emits a wx.CommandEvent, which has no
+   GetKeyCode. _hotkey_run called it unconditionally, so every accelerator
+   press raised AttributeError - every hotkey silently did nothing, including
+   F to capture the flat-field reference. It went unnoticed because a --windowed
+   build sends the traceback to a stderr nobody reads; see
+   seeknano_crash.log, which is how it was finally caught.
+
+2. on_paint cleared the window to black BEFORE building the bitmap. If there
+   was no frame to build from, it returned with the window already black and
+   nothing drawn - indistinguishable on screen from the camera dropping out.
+   It must build first and leave the previous picture alone if it has nothing.
+"""
+import ast
+import pathlib
+import types
+
+SRC = pathlib.Path(r"C:\a\src\app\viewer.py")
+TEXT = SRC.read_text(encoding="utf-8")
+tree = ast.parse(TEXT)
+FAIL = []
+
+
+def check(cond, msg):
+    print(("   ok   " if cond else "   FAIL ") + msg)
+    if not cond:
+        FAIL.append(msg)
+
+
+class FakeWx:
+    WXK_ESCAPE = 27
+    WXK_SPACE = 32
+    Pen = staticmethod(lambda *a, **k: None)
+
+
+ns = {"wx": FakeWx()}
+for name in ("_hotkey_run",):
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef) and n.name == name)
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), str(SRC), "exec"), ns)
+
+import re as _re
+for _line in TEXT.splitlines():
+    _m = _re.match(r"^([A-Z_][A-Z_0-9]*)\s*=\s*(\{.*\}|[\d.]+|\(.*\))\s*$", _line)
+    if _m:
+        try:
+            ns[_m.group(1)] = eval(_m.group(2), {"wx": FakeWx}, {})
+        except Exception:
+            pass
+# ACCEL_KEY is a multi-line dict, so pull it straight from the AST
+for _node in tree.body:
+    if isinstance(_node, ast.Assign) and any(
+            getattr(t, "id", None) == "ACCEL_KEY" for t in _node.targets):
+        exec(compile(ast.Module(body=[_node], type_ignores=[]), str(SRC),
+                     "exec"), ns)
+check("ACCEL_KEY" in ns, "ACCEL_KEY was found and loaded")
+ns["wx"] = FakeWx()
+
+
+class KeyEvent(object):
+    """Has GetKeyCode - the CHAR_HOOK path."""
+
+    def __init__(self, code):
+        self._code = code
+
+    def GetKeyCode(self):
+        return self._code
+
+
+class CommandEvent(object):
+    """No GetKeyCode at all - the accelerator path."""
+
+    def __init__(self, name=""):
+        self._name = name
+
+    def GetId(self):
+        return self._name
+
+
+ACTIONS = {"s": "on_toggle", "c": "on_cmap", "p": "on_snapshot",
+           "d": "on_raw", "f": "on_capture_flat"}
+ACCEL_NAMES = {"Start/stop stream": "s", "Next colormap": "c",
+               "Save PNG snapshot": "p", "Dump raw frame": "d",
+               "Capture flat (wall)": "f"}
+
+print("1. accelerator path: a CommandEvent has no GetKeyCode")
+check(not hasattr(CommandEvent("x"), "GetKeyCode"),
+      "the fake CommandEvent really has no GetKeyCode, as wx's does not")
+
+panel = types.SimpleNamespace()
+panel.fired = []
+panel.paused = False
+panel.push_status = lambda s: None
+for meth in set(ACTIONS.values()) | {"Close"}:
+    setattr(panel, meth, (lambda n: lambda *a: panel.fired.append(n))(meth))
+
+for name, key in ACCEL_NAMES.items():
+    panel.fired.clear()
+    try:
+        ns["_hotkey_run"](panel, CommandEvent(name), name)
+        ok = ACTIONS[key] in panel.fired
+    except AttributeError as e:
+        ok = False
+        print("      raised: %r" % e)
+    check(ok, "accelerator %-22r reaches %s" % (name, ACTIONS[key]))
+
+panel.fired.clear()
+ns["_hotkey_run"](panel, CommandEvent("Quit"), "Quit")
+check("Close" in panel.fired, "accelerator Quit closes the window")
+
+panel.fired.clear()
+ns["_hotkey_run"](panel, CommandEvent("Pause"), "Pause")
+check(panel.paused, "accelerator Pause toggles pause")
+
+print("\n2. CHAR_HOOK path: a KeyEvent still works")
+for key, meth in sorted(ACTIONS.items()):
+    panel.fired.clear()
+    ns["_hotkey_run"](panel, KeyEvent(ord(key.upper())), "key")
+    check(meth in panel.fired, "key %r reaches %s" % (key, meth))
+
+panel.fired.clear()
+ns["_hotkey_run"](panel, KeyEvent(FakeWx.WXK_ESCAPE), "key")
+check("Close" in panel.fired, "escape closes the window")
+
+panel.fired.clear()
+panel.paused = False
+ns["_hotkey_run"](panel, KeyEvent(FakeWx.WXK_SPACE), "key")
+check(panel.paused, "space toggles pause")
+
+print("\n3. paint must not clear before it knows it has something to draw")
+paint = next(n for n in ast.walk(tree)
+             if isinstance(n, ast.FunctionDef) and n.name == "on_paint")
+src = ast.get_source_segment(TEXT, paint) or ""
+build_at = src.find("self._bmp()")
+clear_at = src.find("dc.Clear()")
+check(build_at > 0 and clear_at > 0, "on_paint builds a bitmap and clears")
+check(build_at < clear_at,
+      "the bitmap is built BEFORE dc.Clear(), so a missing frame cannot "
+      "leave the window black")
+check("if bmp is None" in src,
+      "and it returns without clearing when there is nothing to draw")
+
+print()
+if FAIL:
+    print("FAILED %d check(s):" % len(FAIL))
+    for f in FAIL:
+        print("  -", f)
+    raise SystemExit(1)
+print("all checks passed")
