@@ -284,5 +284,41 @@ class TestDumpGate(unittest.TestCase):
         self.assertTrue(getattr(v, "_dump_disabled", False))
 
 
+class TestHiddenDevSurfaces(unittest.TestCase):
+    """The stable build shows NO dev tools: the dev upload row and the log
+    field are hidden; CLI modes remain available (hidden, not removed)."""
+
+    def _src(self):
+        return open(os.path.join(REPO, "app", "viewer.py"),
+                    encoding="utf-8").read()
+
+    def test_dev_row_hidden_at_startup(self):
+        src = self._src()
+        self.assertIn("self.dev_sizer = devbox", src)
+        self.assertIn("split.Unsplit(self.log)", src)  # log hidden, not the row
+
+    def test_dev_row_toggle_hook(self):
+        src = self._src()
+        self.assertIn('c == "d":\n            self._dev_shown', src)
+        self.assertIn('c == "l":\n            self._log_shown', src)
+
+    def test_cli_dev_modes_intact(self):
+        src = self._src()
+        for flag in ("--dev-serve", "--dev-bind", "--dump-processed",
+                     "--selftest", "--check-pil"):
+            self.assertIn(flag, src)
+
+    def test_icon_wired(self):
+        src = self._src()
+        self.assertIn("self.SetIcon(", src)
+        assets = os.path.join(REPO, "assets")
+        self.assertTrue(os.path.exists(os.path.join(assets, "icon.ico")))
+        self.assertTrue(os.path.exists(os.path.join(assets, "icon_256.png")))
+        yml = open(os.path.join(REPO, ".github", "workflows", "build.yml"),
+                   encoding="utf-8").read()
+        self.assertIn("--icon assets", yml)
+        self.assertIn("icon_256.png", yml)
+
+
 if __name__ == "__main__":
     unittest.main()

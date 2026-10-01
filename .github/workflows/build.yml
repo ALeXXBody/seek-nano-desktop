@@ -70,11 +70,13 @@ jobs:
       - name: build exe
         run: |
           pyinstaller --onefile --windowed --name SeekNano `
+            --icon assets\\icon.ico `
             --add-binary "libusb-1.0.dll;." `
             --add-binary "seeknanodirect.dll;." `
             --add-binary "seeknanousb.dll;." `
             --collect-all libusb_package `
             --collect-all PIL `
+            --add-data "assets\\icon_256.png;assets" `
             --hidden-import usb.backend.libusb10 `
             app/viewer.py
         shell: powershell

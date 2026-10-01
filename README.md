@@ -9,6 +9,18 @@ libraries and reimplemented it. It now streams a stable 320×240 thermal image a
 **Latest release: [v0.5.0-hotspot](releases/tag/v0.5.0-hotspot)** — hot-spot detection
 and a fix for a stall that left the window showing a static picture.
 
+## UI
+
+The viewer runs in a dark, HUD-style theme (Seek orange on deep navy, cyan
+readouts) matching the emblem icon (`assets/make_icon.py` builds it;
+PyInstaller embeds it into the exe). Diagnostics stay out of sight:
+
+- the log field is hidden — `Ctrl+L` shows/hides it
+- the dev upload row (frame upload to a dev host, endpoint retries, bind
+  probes) is hidden — `Ctrl+Alt+D` shows/hides it
+- the CLI dev modes still work as before: `--dev-serve`, `--dev-bind`,
+  `--dump-processed`, `--serve`, `--selftest`, `--check-pil`
+
 ## Quick start
 
 1. Download `SeekNano.exe` from the [releases page](releases).

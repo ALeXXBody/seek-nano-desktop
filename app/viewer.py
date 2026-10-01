@@ -397,6 +397,23 @@ def gray_lut(t):
 
 COLORMAPS = [("ironbow", ironbow), ("hot", hot_lut), ("grayscale", gray_lut)]
 
+# ---------------------------------------------------------------------------
+# theme: camera-specific colours. Seek Thermal's brand orange on a deep
+# navy-black field, with a HUD cyan for secondary readouts - the same palette
+# the emblem icon uses, so the app reads as one product.
+THEME = {
+    "bg":      (10, 14, 20),      # tile near-black blue
+    "panel":   (16, 22, 30),      # header / log field
+    "text":    (222, 228, 235),   # near-white
+    "muted":   (130, 142, 154),
+    "accent":  (255, 107, 53),    # Seek orange - primary actions
+    "accent2": (38, 198, 218),    # HUD cyan - status / readouts
+    "ok":      (46, 204, 113),    # connected LED
+    "warn":    (255, 193, 7),     # saturated / held
+    "err":     (255, 76, 76),     # fault LED
+}
+
+
 RAW_W, RAW_H = 342, 260
 IMG_W, IMG_H = 320, 240
 # The 240x320 image does NOT start at (1, 4) in the 342x260 buffer. Scoring every
@@ -1093,6 +1110,60 @@ class Stream(threading.Thread):
                     pass
 
 
+class HeaderPanel(wx.Panel):
+    """Futuristic HUD header: emblem LED, app name, live fps readout.
+
+    Painted, not toolkit widgets: monospace status line on a deep navy field,
+    a cyan LED dot whose colour carries the connection state.
+    """
+
+    def __init__(self, parent, theme):
+        wx.Panel.__init__(self, parent, style=wx.BG_STYLE_PAINT)
+        self.t = theme
+        self.led_text = "no device"
+        self.led_col = self.t["muted"]
+        self.fps_text = ""
+        self.info_text = ""
+        self.Bind(wx.EVT_PAINT, self.on_paint)
+
+    def set_state(self, text, colour, fps="", info=""):
+        self.led_text, self.led_col = text, colour
+        self.fps_text, self.info_text = fps, info
+        self.Refresh()
+
+    def on_paint(self, ev):
+        w, h = self.GetClientSize()
+        dc = wx.AutoBufferedPaintDC(self)
+        col = self.t["panel"]
+        dc.SetBackground(wx.Brush(wx.Colour(*col)))
+        dc.Clear()
+        # LED
+        x0, y0 = 18, h / 2.0
+        dc.SetBrush(wx.Brush(wx.Colour(*self.led_col)))
+        dc.SetPen(wx.Pen(wx.Colour(*self.led_col)))
+        dc.DrawCircle(x0, y0, 7)
+        # LED state text
+        dc.SetTextForeground(wx.Colour(*self.t["text"]))
+        dc.SetFont(self._font(11, True))
+        dc.DrawText(self.led_text, x0 + 16, y0 - 20)
+        # dpi readout (muted, right side)
+        if self.fps_text:
+            dc.SetFont(self._font(10))
+            dc.SetTextForeground(wx.Colour(*self.t["accent2"]))
+            fw, _fh = dc.GetTextExtent(self.fps_text)
+            dc.DrawText(self.fps_text, w - fw - 18, y0 - 20)
+        if self.info_text:
+            dc.SetFont(self._font(9))
+            dc.SetTextForeground(wx.Colour(*self.t["muted"]))
+            iw, _ih = dc.GetTextExtent(self.info_text)
+            dc.DrawText(self.info_text, w - iw - 18, y0 + 6)
+
+    def _font(self, size, bold=False):
+        f = wx.Font(int(size), wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL,
+                    wx.FONTWEIGHT_BOLD if bold else wx.FONTWEIGHT_NORMAL)
+        return f
+
+
 class Viewer(wx.Frame):
     def __init__(self):
         wx.Frame.__init__(self, None, title="Seek Nano Viewer", size=(1000, 660))
@@ -1136,7 +1207,17 @@ class Viewer(wx.Frame):
         self.prev_t = None        # previous displayed frame, for the blend
         self.stretch_skips = 0    # frames whose stretch window was rejected
 
+        # ---- window chrome: dark futuristic theme ------------------------
+        self.SetBackgroundColour(wx.Colour(*THEME["bg"]))
+        self.SetForegroundColour(wx.Colour(*THEME["text"]))
+
         panel = wx.Panel(self)
+        panel.SetBackgroundColour(wx.Colour(*THEME["bg"]))
+        panel.SetForegroundColour(wx.Colour(*THEME["text"]))
+
+        # HUD header: LED + app name + fps readout, painted (no widgets)
+        self.header = HeaderPanel(panel, THEME)
+
         top = wx.BoxSizer(wx.HORIZONTAL)
 
         self.start_btn = wx.Button(panel, label="Start stream")
@@ -1155,9 +1236,34 @@ class Viewer(wx.Frame):
         copy_btn.Bind(wx.EVT_BUTTON, self.on_copy)
         clear_btn = wx.Button(panel, label="Clear log")
         clear_btn.Bind(wx.EVT_BUTTON, self.on_clear)
+
+        def cool(b, fg=None, bg=None, bold=False, big=False):
+            """Theme a button. The stock wimp-grey read out of place."""
+            b.SetBackgroundColour(wx.Colour(*(bg or THEME["panel"])))
+            b.SetForegroundColour(wx.Colour(*(fg or THEME["text"])))
+            f = b.GetFont()
+            if big:
+                f = wx.Font(15, f.GetFamily() if hasattr(f, "GetFamily")
+                            else wx.FONTFAMILY_DEFAULT,
+                            wx.FONTSTYLE_NORMAL,
+                            wx.FONTWEIGHT_BOLD if bold else wx.FONTWEIGHT_NORMAL)
+                b.SetFont(f)
+            elif bold:
+                b.SetFont(b.GetFont().Bold())
+            b.SetOwnBackColor(b.GetBackgroundColour())
+            b.SetOwnForeColor(b.GetForegroundColour())
+
+        cool(self.start_btn, fg=THEME["bg"], bg=THEME["accent"], big=True)
+        cool(self.cmap_btn)
+        cool(self.flat_btn)
+        cool(flat_clear)
+        cool(snap_btn)
+        cool(raw_btn)
+        cool(copy_btn)
+        cool(clear_btn)
         for b in (self.start_btn, self.cmap_btn, self.flat_btn, flat_clear,
                     snap_btn, raw_btn, copy_btn, clear_btn):
-            top.Add(b, 0, wx.ALL, 3)
+            top.Add(b, 0, wx.ALL, 4)
 
         # --------------------------------------------------------------------
         # --- Hot-spot detection row ------------------------------------------
@@ -1171,16 +1277,19 @@ class Viewer(wx.Frame):
         spot_sens = wx.Button(panel, label="sens 1.00")
         spot_sens.Bind(wx.EVT_BUTTON, self.on_spot_sens)
         self.spot_sens_btn = spot_sens
+        cool(self.spot_btn)
+        cool(spot_sens)
         hot = wx.BoxSizer(wx.HORIZONTAL)
         for b in (self.spot_btn, self.spot_sens_btn):
-            hot.Add(b, 0, wx.ALL, 3)
+            hot.Add(b, 0, wx.ALL, 4)
         hot.Add((20, 1), 1, wx.EXPAND)
         self.hot_sizer = hot
         # --------------------------------------------------------------------
 
         # --------------------------------------------------------------------
         # --- DEV row: frame upload to a dev host + endpoint / bind probes --
-        # Internal to the development flow, removed for the stable build.
+        # Internal to the development flow, kept but HIDDEN. Toggle with
+        # Ctrl+Alt+D; the stable build never shows it.
         self.dev_host = wx.TextCtrl(panel, value="192.168.50.200:8100",
                                     style=wx.TE_PROCESS_ENTER)
         self.dev_upload = wx.CheckBox(panel, label="dev: upload frames")
@@ -1189,8 +1298,17 @@ class Viewer(wx.Frame):
         self.dev_upload.SetValue(False)
         self.dev_probe.Bind(wx.EVT_BUTTON, self.on_dev_probe)
         self.dev_bind.Bind(wx.EVT_BUTTON, self.on_dev_bind)
+        cool(self.dev_probe)
+        cool(self.dev_bind)
+        self.dev_host.SetBackgroundColour(wx.Colour(*THEME["panel"]))
+        self.dev_host.SetForegroundColour(wx.Colour(*THEME["accent2"]))
+        self.dev_upload.SetBackgroundColour(wx.Colour(*THEME["bg"]))
+        self.dev_upload.SetForegroundColour(wx.Colour(*THEME["muted"]))
+        devbox = wx.BoxSizer(wx.HORIZONTAL)
         for b in (self.dev_host, self.dev_upload, self.dev_probe, self.dev_bind):
-            top.Add(b, 0, wx.ALL, 3)
+            devbox.Add(b, 0, wx.ALL, 4)
+        devbox.Add((20, 1), 1, wx.EXPAND)
+        self.dev_sizer = devbox
         # --------------------------------------------------------------------
 
         split = wx.SplitterWindow(panel, style=wx.SP_LIVE_UPDATE)
@@ -1213,7 +1331,12 @@ class Viewer(wx.Frame):
         self.video.Bind(wx.EVT_PAINT, self.on_paint)
         self.log = wx.TextCtrl(split, style=wx.TE_MULTILINE | wx.TE_READONLY |
                                wx.TE_DONTWRAP)
+        self.log.SetBackgroundColour(wx.Colour(*THEME["panel"]))
+        self.log.SetForegroundColour(wx.Colour(*THEME["muted"]))
+        self.log.SetFont(wx.Font(9, wx.FONTFAMILY_TELETYPE,
+                                 wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
         sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(self.header, 0, wx.EXPAND, 46)
         sizer.Add(top, 0, wx.EXPAND)
         # The hot-spot row has to be added to the sizer that is actually
         # attached to the panel. Built but never added, both buttons sat at the
@@ -1221,12 +1344,29 @@ class Viewer(wx.Frame):
         # enumerating child window rects, not by any test, because a control that
         # is never laid out still reports a plausible size.
         sizer.Add(hot, 0, wx.EXPAND)
+        sizer.Add(devbox, 0, wx.EXPAND)
         sizer.Add(split, 1, wx.EXPAND)
         panel.SetSizer(sizer)
         split.SplitVertically(self.video, self.log, 420)
         split.SetSashPosition(420)
+        # the diagnostics field is hidden in the stable build; Ctrl+L shows it
+        split.Unsplit(self.log)
+        self.split = split
 
         self.SetStatusBar(wx.StatusBar(self))
+        self.GetStatusBar().SetBackgroundColour(wx.Colour(*THEME["bg"]))
+        self.GetStatusBar().SetForegroundColour(wx.Colour(*THEME["muted"]))
+
+        # emblem icon in the window + taskbar (assets/ is wired into the exe)
+        _icon = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "..", "assets", "icon_256.png")
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            _icon = os.path.join(sys._MEIPASS, "assets", "icon_256.png")
+        try:
+            if os.path.exists(_icon):
+                self.SetIcon(wx.Icon(_icon, wx.BITMAP_TYPE_PNG))
+        except Exception:
+            pass
         self.push_status("plug the Nano in, then press Start stream")
         self._load_flat()
 
@@ -1294,6 +1434,20 @@ class Viewer(wx.Frame):
 
     def push_status(self, text):
         self.GetStatusBar().SetStatusText(text)
+        # HUD header carries the same state, colour-mapped
+        low = text.lower()
+        if "error" in low or "fault" in low or "unavail" in low:
+            colour, label = THEME["err"], text
+        elif "saturat" in low or "held" in low or "capturing" in low:
+            colour, label = THEME["warn"], text
+        elif "connected" in low or "streaming" in low or "running" in low:
+            colour, label = THEME["ok"], text
+        elif "stopped" in low or "no device" in low or low.startswith("plug"):
+            colour, label = THEME["muted"], text
+        else:
+            colour, label = THEME["accent2"], text
+        info = getattr(self._info, "strip", lambda: "")() if self._info else ""
+        self.header.set_state(label, colour, info=info[:60])
 
     # ---- stream control ----
     def on_toggle(self, ev):
@@ -2212,6 +2366,11 @@ class Viewer(wx.Frame):
                 # is the only way to see what the app is doing without the user
                 # having to describe the screen
                 self._info = payload
+                if getattr(self, "header", None) is not None:
+                    # HUD telemetry readout (e.g. "frame 39 ms")
+                    self.header.set_state(self.header.led_text,
+                                          self.header.led_col,
+                                          fps=payload)
                 _vlog("INFO", payload)
                 continue
             if kind == "log":
@@ -2434,12 +2593,30 @@ class Viewer(wx.Frame):
             self.push_status("paused" if self.paused else "running")
 
     def on_key(self, ev):
-        """Hotkeys documented in app/README.md: s c p d f q (and space)."""
+        """Hotkeys documented in app/README.md: s c p d f q (and space).
+        Hidden surfaces: Ctrl+Alt+D shows the dev upload row, Ctrl+L the log."""
         k = ev.GetKeyCode()
         try:
-            c = chr(k)
+            c = chr(k).lower()
         except ValueError:
             c = ""
+        ctrl = ev.ControlDown()
+        alt = ev.AltDown()
+        if ctrl and alt and c == "d":
+            self._dev_shown = not getattr(self, "_dev_shown", False)
+            self.dev_sizer.ShowItems(self._dev_shown)
+            self.Layout()
+            ev.Skip()
+            return
+        if ctrl and c == "l":
+            self._log_shown = not getattr(self, "_log_shown", False)
+            if self._log_shown:
+                self.split.SplitVertically(self.video, self.log, 420)
+                self.split.SetSashPosition(420)
+            else:
+                self.split.Unsplit(self.log)
+            ev.Skip()
+            return
         if c in "scpdf " or k in (wx.WXK_ESCAPE, wx.WXK_SPACE):
             if c == "s":
                 self.on_toggle(None)
