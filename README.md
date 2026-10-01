@@ -1,176 +1,163 @@
-# Seek Nano Desktop Project
+# Seek Nano Desktop Viewer
 
-Project goal: reverse-engineer the **Seek Nano** (USB-C thermal camera, phone-only by
-design) and build a **desktop PC viewer/driver** so the camera can be used directly on a
-computer (Linux/Windows).
+A desktop viewer for the **Seek Nano** thermal camera (USB `289D:0011`). The camera
+ships with a phone-only Android/iOS app and Seek does not publish a desktop SDK, so
+this project reverse-engineered the USB protocol from the app's bundled native
+libraries and reimplemented it. It now streams a stable 320×240 thermal image at
+**25 fps** on Windows.
 
-## Dev build extras (until stable)
+**Latest release: [v0.5.0-hotspot](releases/tag/v0.5.0-hotspot)** — hot-spot detection
+and a fix for a stall that left the window showing a static picture.
 
-These are development-only hooks; the plan is to drop them once the stream path is
-proven stable.
+## Quick start
 
-* **`--dev-serve [host[:port]]`** — headless frame collector. Opens the camera, walks
-  *all* bulk-in endpoints of both composite children (`MI_00`/`0x81` and
-  `MI_01`/`0x82`), streams every captured frame to a collector over plain HTTP PUT
-  (`http://host:port/frame_NNNN.raw`). Replaces the earlier `bind.ps1` +
-  `loop.ps1` + `curl.exe` chain with a single double-click: nothing else is
-  needed on the camera box.
-* **`--dev-bind`** — print the PnP binding state of every Seek node to
-  `bindinfo.txt` (replaces `diag.cmd`).
-* **GUI dev row** — `dev: upload frames` + host field + `dev: retry endpoints`
-  + `dev: bind info`. Frames captured while the checkbox is on are POSTed to
-  the TrueNAS dev host (default `192.168.50.200:8100`) over plain HTTP.
-* **Endpoint auto-probe** — the bulk stream no longer assumes the first listed
-  endpoint; it walks the candidate list (`0x81` then `0x82`) and switches to
-  whichever one is actually streaming. Direct capture on the camera host
-  confirmed the thermal stream on `MI_00`/`0x81`; `MI_01`/`0x82` is silent.
+1. Download `SeekNano.exe` from the [releases page](releases).
+2. Windows will not have a driver for this camera. Run `SeekNanoDriverInstaller.exe`
+   from `SeekNano-driver.zip` once (Device Manager fallback in
+   [app/README.md](app/README.md)).
+3. Plug the Nano in and run `SeekNano.exe`.
+4. Press **Start stream**, then **F** while pointing at a flat wall. That builds the
+   flat-field reference and the bad-pixel map, and it is worth doing every session —
+   see [Getting a clean image](#getting-a-clean-image).
 
-## Status: **in progress** — APK intelligence gathering complete, dynamic trace pending.
+## Controls
 
----
-
-## 1. Why the camera does not work on a PC (public state of the art)
-
-- Seek's FAQ states the Nano works only with the *Seek Nano* Android/iOS app and
-  "will not work with Seek's SDK".
-- [OpenThermal/libseek-thermal](https://github.com/OpenThermal/libseek-thermal)
-  (the main open-source Linux driver) supports the Compact/CompactXR/CompactPRO line
-  only and **explicitly does not support the Nano 200/300** (open issue, no work done).
-- The Nano support request (Sep 2025) has had no reverse-engineering progress.
-
-## 2. What this project found
-
-The Seek Nano Android app (`com.thermal.seeknano`, version **1.5.0**, versionCode 27)
-was pulled from APKPure as an XAPK (35 MB) and dissected. It is a **Flutter** app that
-ships Seek's **full native thermal SDK** as Android `.so` libraries — this is the
-proprietary protocol itself, bundled inside a freely downloadable app.
-
-### 2.1 Native library inventory (`lib/armeabi-v7a/`, from `config.armeabi_v7a.apk`)
-
-| Library | Size | Role |
-|---|---|---|
-| `libseekcamera.so` | 368 KB | Camera SDK core: capture sessions, AGC, color palettes, thermography, **`seekcamera_nano_unlock`** |
-| `libseekusb.so` | 22 KB | USB abstraction: device manager, authenticator, control/bulk transfer glue to Android Java USB API |
-| `libseekframe.so` | 9 KB | Frame container API |
-| `libseekspi.so` / `libseeki2c.so` / `libseekgpio.so` / `libseekfs.so` / `libseekgdf.so` | 5–104 KB | Sensor bus + firmware FS layers (OEM core shared code) |
-| `libseekip.so` | 224 KB | IP-mode streaming (network core support) |
-| `libseekutils.so` | 20 KB | Shared utils |
-| `libapp.so` + `libflutter.so` | — | Flutter UI (Dart AOT compiled) |
-
-Also bundled: FFmpeg libs (`libav*`, `libsw*`) used for video encoding/recording.
-
-### 2.2 Exported symbols of interest
-
-`libseekusb.so` (all 50 exports listed in [docs/symbols-libseekusb.md](docs/symbols-libseekusb.md)):
-- `seekusb_device_manager_create/destroy`
-- `seekusb_device_run` / `register_frame_available_callback`
-- `seekusb_device_get/set_opmode`, `get/set_timeout`, `get/set_frame_request_delay`
-- `seekusb_device_get_chipid`, `get_firmware_info`, `get_serial_number`,
-  `get_core_part_number`, `get_factory_settings`, `get_manufacture_date`
-- `seekusb_device_read/write/copy_memory_region`
-- `seekusb_device_peripheral_control`, `sleep`, `reboot`, `bandwidth_test`
-- **`seekusb_authenticator_create`**, `authenticator_allow/deny_guid`,
-  `authenticator_allow/deny/query_core_part_number` ← the vendor/device lock logic
-
-`libseekcamera.so` (160 exports):
-- `seekcamera_manager_create`, `seekcamera_capture_session_start/stop`,
-  `seekcamera_register_frame_available_callback`
-- `seekcamera_frame_get_frame_by_format` (multiple pixel formats)
-- **`seekcamera_nano_unlock`** ← present and confirmed by string
-  `"Failed to unlock nano device: %s"`
-- String `Microcore` confirms the Nano is treated as Seek's OEM "Micro Core" line.
-
-### 2.3 USB facts recovered from the Java/dex layer (decompiled with androguard)
-
-From `com.thermal.seekcamera.NativeUsbDeviceManager` / `NativeUsbDevice`:
-
-| Constant | Value | Meaning |
-|---|---|---|
-| **Vendor ID** | `0x289D` (10397) | Seek Thermal — matches **any product ID** from this vendor |
-| Interface | 0 | single interface |
-| Control endpoint | EP0 | `bmRequestType` = `0xC0` (IN) / `0x40` (OUT), built in `ControlTransfer()` |
-| **Bulk IN endpoint** | interface 0, endpoint index 1 | frame data |
-| Bulk chunk cap | 16,224 B | per-transfer cap (`Math.min(16224, remaining)`) |
-| USB timeout | 1250 ms | default `usbTimeout` |
-| Frame buffer | **177,840 B** | pre-allocated bulk receive array |
-| Control request `0x36` | 12-byte return | chip ID / firmware info read (seen in `GetChipID()` debug call) |
-
-Frame-buffer math: 177,840 B ≈ Nano-300 raw frame (320×240 px @ 16-bit = 153,600 B)
-plus per-frame header/padding. The bulk receive loop calls back into native code
-(`libseekusb.so` JNI) which consumes frames and tracks throughput metrics.
-
-### 2.4 The lock ("authenticator") & unlock
-
-- `libseekusb.so` strings reveal four GUIDs used by the authenticator:
-  ```
-  F4BAF4F4-177D-4165-8A6B-90C3306F9CA3
-  36607C12-F598-4044-AD5C-A8F98DDA496A
-  53225FC0-DE69-4DCB-AD8F-3CB36214ABE1
-  9DAD69CE-287C-4C5C-9A2A-EE310EE8A9B3
-  ```
-- `libseekcamera.so` contains **`seekcamera_nano_unlock`** and log strings
-  `"Failed to unlock nano device: %s"`, `"Microcore"`,
-  `"Failed to meet product firmware version requirement"`.
-- Conclusion: the Nano implements a firmware-level authenticity check that the
-  phone app satisfies during init — this sequence is what we must capture and replay
-  in the PC driver.
-
-### 2.5 What we do *not* have yet
-
-- The actual init handshake byte sequence (control transfer values, magic writes,
-  authenticator ticket exchange) — it lives inside stripped ARM Thumb code in
-  `libseekcamera.so` / `libseekusb.so`.
-- Frame payload layout (header fields, temperature encoding, calibration data).
-- Both are being obtained via **dynamic instrumentation** (see roadmap).
-
-## 3. The spy app (built, awaiting deployment)
-
-To capture the protocol without any physical connection to the server:
-
-1. The Play Store XAPK was merged into a universal APK (`APKEditor`).
-2. A **Frida gadget 17.19.0** (arm) was injected as `lib/armeabi-v7a/libseekgadget.so`;
-   `MainActivity.<clinit>` was smali-patched to `System.loadLibrary("seekgadget")`
-   *before* loading `seekcamera`.
-3. Gadget config asset (`assets/libseekgadget_config.so`, actually JSON) loads
-   `spytrace.js` from `/data/local/tmp/` and hot-reloads on change.
-4. Package renamed `com.thermal.seeknano` → **`com.thermal.seeknanospy`**
-   (manifest package, custom permission, androidx-startup / share-provider
-   authorities, arsc package name) so it **installs alongside** the original app
-   without conflict; original app remains untouched.
-5. Re-signed with a local key; manifest renames verified with androguard.
-
-Artifacts: `seekspy-installer.apk` (51 MB) — see `artifacts/` (attached to repo
-releases rather than git, too big for git).
-
-## 4. Roadmap
-
-- [x] Pull APK, extract native SDK + dex
-- [x] Static analysis: VID/PID policy, endpoints, timeouts, buffer sizes,
-      `nano_unlock` symbol presence, authenticator GUIDs
-- [x] Build + sign spy APK (Frida gadget, renamed package)
-- [ ] Install on phone, pair adb over **wireless debugging** (no cable)
-- [ ] Trace one full live session: connect → unlock → stream → disconnect
-- [ ] Reconstruct handshake in `pcdriver/` (Python + libusb/usb.core)
-- [ ] Validate frame format against native frame metrics
-- [ ] Build desktop viewer: colormaps, spot/temp, snapshots, recording,
-      optional v4l2loopback output
-- [ ] Document full protocol in `docs/protocol.md`
-
-## 5. Tooling used (all scripted, nothing manual)
-
-| Tool | Purpose |
+| Key | Action |
 |---|---|
-| androguard 4.1.4 | dex/axml/arsc parsing, manifest verification |
-| APKEditor 1.4.9 | split-APK merge, XML/arsc decode + rebuild |
-| apktool 3.0.3 (available) | fallback smali roundtrip |
-| radare2 6.2.2 | ARM/Thumb disassembly of native libs |
-| frida / frida-tools 17.19 | dynamic instrumentation (gadget injected in APK) |
-| apksigner + keytool | repack signing |
-| adb | wireless-debugging install/trace transport |
+| **S** | Start / stop stream |
+| **F** | Capture flat-field reference (point at a uniform wall) |
+| **C** | Next colormap |
+| **P** | Save PNG snapshot |
+| **D** | Dump raw frame |
+| **Space** | Pause |
+| **Q** | Quit |
 
-## 6. Legal note
+Two more buttons cycle hot-spot detection: **hot spots** steps through
+`off → mark → outline → track → alarm`, and **sens** steps the detection sensitivity
+through `0.35 → 1.00 → 2.50`.
 
-The APK is publicly distributed by Seek Thermal and analyzed here strictly for
+## Hot-spot detection
+
+Finds regions that are notably hotter than the scene and reports where they are.
+Four modes, all sharing one detector:
+
+- **mark** — box each region with a crosshair on the hottest
+- **outline** — box them without the crosshair
+- **track** — leave a fading trail so you can see a fault developing
+- **alarm** — flash the frame border while any region is detected
+
+**Values are in device units (DL), not degrees, and are labelled that way.** No
+absolute temperature is available from this camera: there is no calibration in the
+app, in this codebase, or in the captured symbol and string dumps. Reporting degrees
+would mean inventing a conversion, so the viewer does not pretend to. It labels each
+region relative to the current scene instead, which is the honest reading.
+
+Detection runs on corrected device-unit values *before* the contrast stretch.
+Stretching maps every frame across the full colormap, which would make every frame
+hot by construction and the question meaningless.
+
+**Known limitation.** On a strongly textured scene the detector cannot be both
+sensitive and free of false positives. Measured on a synthetic ±160 DL periodic
+texture, a genuine +300 DL hotspot is only about 2× the scene's own variation, and
+the texture itself produces 21 candidate regions. That is a property of the scene
+rather than a defect in the detector, which is why the mode and sensitivity are
+user-selectable rather than tuned to a fixed answer.
+
+## Getting a clean image
+
+**Press F on a flat wall each session.** The sensor's per-pixel offsets drift as it
+warms, so yesterday's reference actively hurts: measured on this hardware, a
+reference captured four hours earlier took the noise from 223 DL to 318 DL. The
+viewer judges the reference against live data and rejects it when it stops helping,
+but a fresh capture is always better. On a good capture the reference takes
+neighbour-difference noise from ~240 DL down to single digits.
+
+Defective elements are mapped separately. They are found by their *flicker* rather
+than their offset, judged across the captured frames against a temporal median so
+the fixed pattern cancels out. Judging a single averaged image missed four of six
+confirmed defects, because their offset moves between captures while they stay
+present in every frame.
+
+> **Known uncertain:** the most recent real wall capture found **0** bad pixels,
+> where the earlier single-image test found 9 on that same reference. This is
+> unexplained and the bad-pixel map should not be trusted until a capture on a
+> uniform surface is checked.
+
+## Performance
+
+Measured on the real device and measured on the **screen**, not just the app's
+output:
+
+| Metric | Value |
+|---|---|
+| Stream rate | 24.96 fps (25 is the camera's native rate) |
+| Paints reaching the screen | ~20/s |
+| Black frames in 250 screen grabs | **0** |
+| Bulk transfer failures | 0 |
+
+Two fixes mattered a lot here, both found by measuring rather than reading the code:
+
+- The 3×3 median cost **49 ms/frame** because `np.median` also computes the mean of
+  the two central elements — wasted work when the count is odd. `np.partition` at
+  k=4 is bit-identical and takes 25 ms. This was the stall: paints measured
+  **0.00/s**, so the window sat static while the reader thread logged frames.
+- Peak-finding for the hottest-region mode cost **50–79 ms/call** because it cut at
+  the 90th percentile, masked ~10% of the image, then built a full-frame boolean
+  mask per component. Replaced with local-maxima peak finding at ~10 ms, whose cost
+  no longer scales with how busy the scene is.
+
+## What the project found
+
+The Android app (`com.thermal.seeknano` 1.5.0) ships Seek's full proprietary
+thermal SDK as native `.so` libraries — the protocol itself, inside a freely
+downloadable app.
+
+| Fact | Value |
+|---|---|
+| Vendor ID | `0x289D` (Seek Thermal) |
+| Product ID | `0x0011` |
+| Bulk IN endpoint | `0x81` on interface 0 |
+| Control transfers | `0xC0` in / `0x40` out |
+| Frame buffer | **177,840 B** = 342 × 260 × 2 bytes |
+| Usable image region | rows 12–251, cols 2–321 = **320 × 240** |
+| Frame rate | 25 fps, native |
+
+The 177,840-byte buffer is exactly 342×260 `uint16`, not a header plus image — that
+was confirmed against a captured phone trace. Frame kickoff is `58 5b 01 00`, which
+is byte-identical to the phone app's. Detail is in [docs/protocol.md](docs/protocol.md)
+and [docs/native-analysis.md](docs/native-analysis.md).
+
+### Three earlier "fixes" that were wrong, and were reverted
+
+Recorded because the measurements are the interesting part:
+
+- **Low-byte masking** — masked the low byte of each pixel on the theory it was
+  noise. It was real data; masking it destroyed the image.
+- **Full-background subtraction** — subtracting the whole averaged background
+  removed scene content along with the pattern.
+- **Temporal blend** — measurably reduced frame-to-frame movement (1.88×) and was
+  reverted anyway, because it ghosts whenever the scene shifts. Trading visible
+  ghosting for a better metric is a bad trade.
+
+A stutter was chased that did not exist; it turned out to be aliasing in my own
+sampling.
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `app/viewer.py` | The viewer. Pipeline, wx UI, USB transport |
+| `app/hotspot.py` | Hot-spot detection (pure numpy, no scipy) |
+| `docs/` | Protocol notes, native analysis, symbols |
+| `tests/` | 15 suites; several drive the real module on synthetic scenes with known answers |
+| `artifacts/` | Captured phone trace and analysis logs |
+
+Development hooks (`--dev-serve`, `--dev-bind`, the GUI dev row) are documented in
+the README history and remain for diagnostics.
+
+## Legal note
+
+The APK is publicly distributed by Seek Thermal and was analysed here strictly for
 interoperability with hardware its owner already possesses. No Seek code or assets
 are redistributed in this repository — only our own analysis notes, scripts, and
 derived protocol documentation.
