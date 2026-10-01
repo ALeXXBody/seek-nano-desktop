@@ -82,6 +82,8 @@ static int load_libusb(void)
 
 __declspec(dllexport) int SNLB_open(void)
 {
+    /* re-entry guard: overwrite a live handle would leak it */
+    if (g_dev) return -8;
     int r = load_libusb();
     if (r) return r;
     g_dev = p_libusb_open_device_with_vid_pid(g_ctx, 0x289D, 0x0011);
@@ -143,8 +145,9 @@ __declspec(dllexport) int SNLB_fwver(char* out, int cap)
     int r = c_in(0x4E, 64, buf);
     if (r < 0) return -2;
     int j = 0;
-    for (int i = 0; i < 24 && j + 2 < cap; i++)
+    for (int i = 0; i < 24 && j + 3 < cap; i++)
         j += wsprintfA(out + j, "%02x ", buf[i]);
+    if (j > cap - 1) j = cap - 1;
     out[j] = 0;
     return 0;
 }
@@ -225,17 +228,6 @@ __declspec(dllexport) int SNLB_stream_start(void)
     return 0;
 }
 
-static int resync(void)
-{
-    unsigned char junk[6840];
-    p_libusb_clear_halt(g_dev, 0x81);
-    for (int i = 0; i < 4; i++) {
-        int n = 0;
-        p_libusb_bulk_transfer(g_dev, 0x81, junk, 6840, &n, 40);
-    }
-    return 0;
-}
-
 __declspec(dllexport) int SNLB_get_frame(unsigned char* out)
 {
     if (!g_dev || !g_streaming) return -1;
@@ -243,9 +235,15 @@ __declspec(dllexport) int SNLB_get_frame(unsigned char* out)
     int total = 0, kick;
 
     le32(req, 88920);
+    /* Mirror pump_once() in pcdriver/seek_nano.py: poll until the 0x35
+     * readiness readback says a frame is queued, then read. The old fixed
+     * 200-iteration loop ran ~400 control transfers per frame and returned
+     * early readiness yet kept going - pure latency. */
     for (kick = 0; kick < 200; kick++) {
-        c_out(0x53, 4, req);
-        c_in(0x35, 4, req);
+        if (c_out(0x53, 4, req) < 0) return -5;
+        if (c_in(0x35, 4, req) < 0) return -6;
+        if (req[0] != 0 || req[1] != 0)
+            break;
     }
     /* camera queues the frame around now; read it in device chunks */
     while (total < 177840) {
@@ -276,4 +274,5 @@ __declspec(dllexport) void SNLB_close(void)
     p_libusb_close(g_dev);
     g_dev = NULL;
     g_claimed = 0;
+    g_streaming = 0;
 }

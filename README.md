@@ -149,7 +149,7 @@ sampling.
 | `app/viewer.py` | The viewer. Pipeline, wx UI, USB transport |
 | `app/hotspot.py` | Hot-spot detection (pure numpy, no scipy) |
 | `docs/` | Protocol notes, native analysis, symbols |
-| `tests/` | 15 suites; several drive the real module on synthetic scenes with known answers |
+| `tests/` | portable suites run in CI (test_dev_mode.py, test_audit_fixes.py) plus test_*.py hardware-verification suites written for the camera box (C:a dev layout); manual measurement scripts live in diagnostics/ |
 | `artifacts/` | Captured phone trace and analysis logs |
 
 Development hooks (`--dev-serve`, `--dev-bind`, the GUI dev row) are documented in

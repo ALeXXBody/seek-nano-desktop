@@ -25,3 +25,4 @@ latest.png
 seeknano_crash.log
 seeknano_verbose.log
 nuc_out/
+.pytest_cache/

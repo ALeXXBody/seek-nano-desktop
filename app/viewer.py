@@ -102,6 +102,25 @@ def _frame_header(frame_raw):
     return int(u[0]), int(u[1]), int(u[2])
 
 
+def _vlog(kind, payload):
+    """Append to seeknano_verbose.log via one long-lived handle.
+
+    The old code re-opened the file on every log line - up to a few dozen
+    open+close cycles per frame at 25 fps. The handle is created lazily and
+    kept for the life of the process.
+    """
+    global _VLOGFH
+    try:
+        if _VLOGFH is None:
+            _VLOGFH = open("seeknano_verbose.log", "a", buffering=1)
+        _VLOGFH.write("%.3f %s %s\n" % (time.time(), kind, payload))
+    except Exception:
+        _VLOGFH = None
+
+
+_VLOGFH = None
+
+
 def _frame_reason(frame_raw, prev_seq=None):
     """Return None if the frame looks real, else a short reason string.
 
@@ -554,17 +573,23 @@ def _apply_bad_pixels(img, mask):
 
 
 def _boxblur(a, k):
-    """Separable box blur, edge-padded. k must be odd. numpy-only."""
+    """Separable box blur, edge-padded. k must be odd. numpy-only.
+
+    Accumulates in the input's float width: float32 is ample for DL-scale
+    (max ~64000, sums of ~340 terms stay well inside float32 precision)
+    and keeps the 25-frame/s pipeline out of float64 churn.
+    """
     if k < 3:
         return a
+    dt = a.dtype if a.dtype.kind == "f" else np.float64
     pad = k // 2
     p = np.pad(a, ((0, 0), (pad, pad)), mode="edge")
-    c = np.cumsum(p, axis=1, dtype=np.float64)
-    c = np.concatenate([np.zeros((a.shape[0], 1)), c], axis=1)
+    c = np.cumsum(p, axis=1, dtype=dt)
+    c = np.concatenate([np.zeros((a.shape[0], 1), dtype=dt), c], axis=1)
     out = (c[:, k:] - c[:, :-k]) / k
     p = np.pad(out, ((pad, pad), (0, 0)), mode="edge")
-    c = np.cumsum(p, axis=0, dtype=np.float64)
-    c = np.concatenate([np.zeros((1, c.shape[1])), c], axis=0)
+    c = np.cumsum(p, axis=0, dtype=dt)
+    c = np.concatenate([np.zeros((1, c.shape[1]), dtype=dt), c], axis=0)
     return (c[k:, :] - c[:-k, :]) / k
 
 
@@ -775,6 +800,8 @@ class Stream(threading.Thread):
             self.logf = open("seeknano_verbose.log", "a", buffering=1)
         except Exception:
             self.logf = None
+        # try: SEEKNANO_TRACE=1 re-enables the per-transfer handshake trace
+        self.verbose = os.environ.get("SEEKNANO_TRACE", "") not in ("", "0")
 
     def trace(self, line, to_ui=False):
         if self.logf:
@@ -783,13 +810,20 @@ class Stream(threading.Thread):
             self.q.put(("log", line))
 
     def ctrl_out(self, request, payload):
-        self.trace("W req=0x%02x data=%s" % (request, payload.hex()))
+        # per-kick traces ran twice per kick at 25 fps (~50 unbuffered
+        # appends/s of handshake noise). Only trace them when explicitly
+        # asked; failures still always log.
+        verbose = getattr(self, "verbose", False)
+        if verbose:
+            self.trace("W req=0x%02x data=%s" % (request, payload.hex()))
         self.dev.ctrl_transfer(REQ_OUT, request, 0, 0, payload, 1250)
-        self.trace("W req=0x%02x OK" % request)
+        if verbose:
+            self.trace("W req=0x%02x OK" % request)
 
     def ctrl_in(self, request, length):
         r = bytes(self.dev.ctrl_transfer(REQ_IN, request, 0, 0, length, 1250))
-        self.trace("R req=0x%02x len=%d -> %s" % (request, length, r.hex()))
+        if getattr(self, "verbose", False):
+            self.trace("R req=0x%02x len=%d -> %s" % (request, length, r.hex()))
         return r
 
     def put(self, item):
@@ -1132,7 +1166,6 @@ class Viewer(wx.Frame):
         # recorded (at startup). The buffer the app hands to the screen is
         # correct; the erase underneath it was not.
         self.video.SetBackgroundStyle(wx.BG_STYLE_PAINT)
-        self.video.SetBackgroundColour(wx.BLACK)
         self.video.SetBackgroundColour(wx.BLACK)
         self.video.Bind(wx.EVT_PAINT, self.on_paint)
         self.log = wx.TextCtrl(split, style=wx.TE_MULTILINE | wx.TE_READONLY |
@@ -1486,13 +1519,13 @@ class Viewer(wx.Frame):
         self.paint_count = getattr(self, "paint_count", 0) + 1
         if self.paint_count % 25 == 0:
             try:
-                with open("seeknano_verbose.log", "a", buffering=1) as fh:
-                    fh.write("%.3f PAINT %d paints, %d frames shown, "
-                             "last paint drew frame_seq %s"
-                             " | raw p2 %.1f p98 %.1f"
-                             " | window lo %.1f hi %.1f span %.1f"
-                             " | ffc_ok %s | skips %d\n"
-                             % (time.time(), self.paint_count,
+                _vlog("PAINT",
+                      "%d paints, %d frames shown, "
+                      "last paint drew frame_seq %s"
+                      " | raw p2 %.1f p98 %.1f"
+                      " | window lo %.1f hi %.1f span %.1f"
+                      " | ffc_ok %s | skips %d"
+                      % (self.paint_count,
                                 getattr(self, "shown_frames", 0),
                                 getattr(self, "_paint_seq", None),
                                 (self._raw_p[0] if getattr(self, "_raw_p", None)
@@ -1520,13 +1553,13 @@ class Viewer(wx.Frame):
             self.blank_paints = getattr(self, "blank_paints", 0) + 1
             if self.blank_paints in (1, 50, 500):
                 try:
-                    with open("seeknano_verbose.log", "a", buffering=1) as fh:
-                        fh.write("%.3f BLANK paint %d: no frame to draw "
-                                 "(shown %d, held %d, rej %d)\n"
-                                 % (time.time(), self.blank_paints,
-                                    getattr(self, "shown_frames", 0),
-                                    getattr(self, "held_gain", 0),
-                                    getattr(self, "bad_frames", 0)))
+                    _vlog("BLANK",
+                          "paint %d: no frame to draw "
+                          "(shown %d, held %d, rej %d)"
+                          % (self.blank_paints,
+                             getattr(self, "shown_frames", 0),
+                             getattr(self, "held_gain", 0),
+                             getattr(self, "bad_frames", 0)))
                 except Exception:
                     pass
             return
@@ -2115,11 +2148,7 @@ class Viewer(wx.Frame):
                 # is the only way to see what the app is doing without the user
                 # having to describe the screen
                 self._info = payload
-                try:
-                    with open("seeknano_verbose.log", "a", buffering=1) as fh:
-                        fh.write("%.3f INFO %s\n" % (time.time(), payload))
-                except Exception:
-                    pass
+                _vlog("INFO", payload)
                 continue
             if kind == "log":
                 # Panel AND file. Panel-only is invisible from outside, which
@@ -2132,11 +2161,7 @@ class Viewer(wx.Frame):
                                         else payload + "\n")
                 except Exception:
                     pass
-                try:
-                    with open("seeknano_verbose.log", "a", buffering=1) as fh:
-                        fh.write("%.3f LOG %s\n" % (time.time(), payload))
-                except Exception:
-                    pass
+                _vlog("LOG", payload)
                 continue
             if kind == "frame":
                 reason = _frame_reason(payload, self.last_fid)
@@ -2235,20 +2260,25 @@ class Viewer(wx.Frame):
                     else:
                         self.push_status("capturing flat %d/%d - hold still..." % (
                             len(self.ffc_collect), FFC_FRAMES))
-                self.video.Refresh()
-                # Build the display array HERE, on the timer, not in the paint
-                # handler. on_paint used to run the whole pipeline whenever the
-                # cache missed, so its cost alternated between ~5 ms (miss) and
-                # ~1.5 ms (hit) from one paint to the next; flicker tracked that
-                # alternation. Building here means the paint handler only ever
-                # converts and blits, at a constant cost.
-                try:
-                    rgb = self._bmp()
-                except Exception:
-                    self._show_fatal("bmp build", sys.exc_info())
-                    rgb = None
-                if rgb is not None:
-                    self._dump_pngs(rgb)
+                if not self.paused:
+                    # while paused the picture is frozen on purpose: skip
+                    # the refresh and the display rebuild, the pump here
+                    # then costs only validation, not the image pipeline
+                    self.video.Refresh()
+                    # Build the display array HERE, on the timer, not in the
+                    # paint handler. on_paint used to run the whole pipeline
+                    # whenever the cache missed, so its cost alternated
+                    # between ~5 ms (miss) and ~1.5 ms (hit) from one paint
+                    # to the next; flicker tracked that alternation. Building
+                    # here means the paint handler only ever converts and
+                    # blits, at a constant cost.
+                    try:
+                        rgb = self._bmp()
+                    except Exception:
+                        self._show_fatal("bmp build", sys.exc_info())
+                        rgb = None
+                    if rgb is not None:
+                        self._dump_pngs(rgb)
             elif kind == "status":
                 self.push_status(payload)
             elif kind == "error":
@@ -2497,11 +2527,17 @@ def dev_serve(target_url="192.168.50.200:8100", frames_per_batch=3):
     """
     import ctypes
     _box = ctypes.windll.user32.MessageBoxW
-    logf = open("devserve.log", "a", buffering=1)
+    try:
+        logf = open("devserve.log", "a", buffering=1)
+    except Exception:
+        # a read-only cwd must not kill startup in a windowed build
+        # (the traceback would land on a stderr nobody sees)
+        logf = open(os.devnull, "w")
 
     def say(msg, fatal=False):
         print(msg)
-        logf.write("%.3f %s\n" % (time.time(), msg) if not fatal else msg)
+        # one logged line per message (the old say() wrote non-fatal messages
+        # twice: once unconditionally, once more inside the try)
         try:
             logf.write("%.3f %s\n" % (time.time(), msg))
         except Exception:
@@ -2664,7 +2700,6 @@ def dump_mode(outdir="dump", count=40):
     saves the result. This is how we check on the real camera whether the
     correction is engaging, which is not observable from a screenshot.
     """
-    import os
     os.makedirs(outdir, exist_ok=True)
     dev = usb.core.find(idVendor=VID, idProduct=PID, backend=_BACKEND)
     if dev is None:

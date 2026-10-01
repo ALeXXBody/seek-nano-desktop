@@ -78,12 +78,11 @@ jobs:
       - name: smoke-check exe
         shell: cmd
         run: |
-          dist\SeekNano.exe --selftest
-          if errorlevel 1 echo warnings in selftest (still deploying)
+          dist\SeekNano.exe --selftest || exit /b 1
       - name: upload release
         run: |        
           TAG="${GITHUB_REF_NAME}"
-          case "$TAG" in v*) ;; *) TAG="v0.2.0-manual";; esac
+          case "$TAG" in v*) ;; *) TAG="manual-$(date +%Y%m%d)";; esac
           EXE_FILE=$(ls dist/*.exe | head -1)
           rm -f driver/install.ps1 driver/installer.cs && 7z a -tzip SeekNano-driver.zip ./driver/* seeknanousb.dll
           # dev bundle: exe + transport dlls next to the exe, keeping the

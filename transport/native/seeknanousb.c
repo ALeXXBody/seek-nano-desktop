@@ -88,6 +88,10 @@ __declspec(dllexport) void SN_close(void)
 
 __declspec(dllexport) int SN_open(void)
 {
+    /* re-entry guard: a retry after a transient dropout leaked the previous
+     * enumeration with no way to close it */
+    if (g_winusb || g_dev != INVALID_HANDLE_VALUE)
+        return -8;
     HDEVINFO devInfo = SetupDiGetClassDevsW(&SN_DEVGUID, NULL, NULL,
                         DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
     if (devInfo == INVALID_HANDLE_VALUE)
@@ -194,7 +198,13 @@ __declspec(dllexport) int SN_get_frame(unsigned char* out)
             break;
         total += got;
     }
-    return (total == FRAME_BYTES) ? (int)total : -3;
+    if (total != FRAME_BYTES)
+        return -3;
+    /* same magic the libusb transport validates from viewer.py; returning
+     * a full buffer of garbage made the length-only check pass it */
+    if (out[0] != 0x79 || out[1] != 0x05)
+        return -4;
+    return (int)total;
 }
 
 __declspec(dllexport) int SN_stream_stop(void)
@@ -249,8 +259,10 @@ __declspec(dllexport) int SN_fwver(char* out, int cap)
         return -1;
     if (ctrl_in(0x4E, 64, buf) < 0)
         return -2;
-    for (int i = 0; i < 24 && j + 2 < cap; i++)
+    for (int i = 0; i < 24 && j + 3 < cap; i++)
         j += wsprintfA(out + j, "%02x ", buf[i]);
+    if (j > cap - 1)
+        j = cap - 1;
     out[j] = 0;
     return 0;
 }
