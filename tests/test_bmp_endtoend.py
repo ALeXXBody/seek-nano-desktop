@@ -29,6 +29,7 @@ for n in ast.parse(src).body:
 for n in ast.parse(src).body:
     if isinstance(n, ast.FunctionDef) and n.name in {
             "_boxblur", "_nuc2d", "_apply_ffc", "_roi_u16", "_process",
+    "_neighbour_median", "_apply_bad_pixels",
             "decode_frame", "ironbow", "hot_lut", "gray_lut"}:
         exec(compile(ast.Module(body=[n], type_ignores=[]), "v", "exec"), ns)
     elif isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "COLORMAPS":
@@ -74,6 +75,7 @@ class Panel:
         self.bg_frames = []
         self.bg_gains = []
         self.bg_hp = None
+        self.bad = None
         self.shown_frames = 0
         self.held_gain = 0
         self.saturated = 0
