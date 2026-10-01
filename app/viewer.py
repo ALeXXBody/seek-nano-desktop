@@ -963,6 +963,21 @@ class Viewer(wx.Frame):
 
         split = wx.SplitterWindow(panel, style=wx.SP_LIVE_UPDATE)
         self.video = wx.Panel(split, style=wx.BORDER_SUNKEN)
+        # Tell wx "I paint every pixel of this myself". Without it, wxWindows
+        # honours WM_ERASEBKGND and erases the panel to its background brush
+        # before handing us the paint - and that background is black. So every
+        # repaint had a window in which the panel was solid black, which is
+        # exactly the flicker: measured from the real screen the video panel
+        # dropped to mean 0.47/255 with image-std 8.1 while the log panel beside
+        # it stayed perfectly steady (p-p 0.00).
+        #
+        # This was never bad data and never a failed draw. Over 713 paints the
+        # array passed to DrawBitmap had rgb std 69-78 and was never flat,
+        # seeknano_crash.log stayed empty, and only one blank paint was ever
+        # recorded (at startup). The buffer the app hands to the screen is
+        # correct; the erase underneath it was not.
+        self.video.SetBackgroundStyle(wx.BG_STYLE_PAINT)
+        self.video.SetBackgroundColour(wx.BLACK)
         self.video.SetBackgroundColour(wx.BLACK)
         self.video.Bind(wx.EVT_PAINT, self.on_paint)
         self.log = wx.TextCtrl(split, style=wx.TE_MULTILINE | wx.TE_READONLY |
@@ -1265,7 +1280,6 @@ class Viewer(wx.Frame):
                                 getattr(self, "stretch_skips", 0)))
             except Exception:
                 pass
-        dc = wx.PaintDC(self.video)
         # Build the bitmap BEFORE clearing. Clearing first and only then
         # discovering there is nothing to draw leaves the window black, and it
         # stays black until a frame arrives - which on screen is indistinguishable
@@ -1273,11 +1287,11 @@ class Viewer(wx.Frame):
         # something to put there, so a gap between frames keeps showing the last
         # picture instead of flashing to black.
         try:
-            bmp = self._bmp()
+            rgb = self._bmp()
         except Exception:
             self._show_fatal("paint", sys.exc_info())
             return
-        if bmp is None:
+        if rgb is None:
             self.blank_paints = getattr(self, "blank_paints", 0) + 1
             if self.blank_paints in (1, 50, 500):
                 try:
@@ -1291,8 +1305,32 @@ class Viewer(wx.Frame):
                 except Exception:
                     pass
             return
-        dc.SetBackground(wx.BLACK_BRUSH)
-        dc.Clear()
+        # The ENTIRE draw is inside its own try. It used to stop wrapping at
+        # _bmp(), so a throw from wx.Image/Scale/Bitmap/DrawBitmap - the exact
+        # calls that were failing - left the panel cleared to black with nothing
+        # drawn and no error recorded anywhere, because in a windowed build an
+        # exception in an event handler goes to a stderr nobody sees.
+        try:
+            bmp = self._to_bitmap(rgb)
+            # wx.BufferedPaintDC, NOT wx.PaintDC. A plain PaintDC draws straight
+            # onto the window, so the panel is visible mid-repaint and Windows
+            # can erase it before the handler runs - the erased state is a black
+            # panel. Measured from the real screen: the video panel went to mean
+            # 0.47/255 with image-std 8.1 while normally sitting at mean 140 with
+            # std 69, and the log panel beside it was rock steady (p-p 0.00), so
+            # the flicker was entirely in the panel being drawn.
+            #
+            # Nothing was throwing: seeknano_crash.log stayed empty, and the
+            # array handed to DrawBitmap was provably good on all 713 paints
+            # (rgb std 69-78, never flat). So this was never bad data and never
+            # a failed draw - it was an unbuffered one.
+            # BufferedPaintDC draws off-screen and blits atomically.
+            dc = wx.BufferedPaintDC(self.video)
+            dc.SetBackground(wx.BLACK_BRUSH)
+            dc.Clear()
+            dc.DrawBitmap(bmp, 0, 0)
+        except Exception:
+            self._show_fatal("draw", sys.exc_info())
         dc.DrawBitmap(bmp, 0, 0)
 
     def _overlay(self, t):
@@ -1561,13 +1599,29 @@ class Viewer(wx.Frame):
         self.prev_t = t
         t = self._overlay(t)
         rgb = COLORMAPS[self.lut_i][1](t).astype(np.uint8)
-        i2 = wx.Image(IMG_W, IMG_H, rgb.tobytes())
-        # Continuously keep the newest displayed frame on disk as latest.png.
-        # This exists because the hotkeys never worked (a key event is only
-        # delivered to the widget that holds keyboard focus, and after clicking
-        # Start that is a button). Rather than keep asking the user to press a
-        # key that may not reach the handler, the app just leaves the current
-        # picture where it can be read at any time. Overwrites in place, ~1 Hz.
+        # Cache the NUMPY array, never a wx object. This used to build a wxImage,
+        # scale it, wrap it in a wx.Bitmap and cache that bitmap across paints.
+        # The scale makes a 2x-larger buffer that the Bitmap may reference
+        # rather than copy, and the temporary wxImage then goes out of scope -
+        # so the cached GDI object was left pointing at released memory. The
+        # symptom was the screen alternating between a correct picture and a
+        # blank panel once per paint, with no exception anywhere, because
+        # nothing in the draw path was wrapped.
+        #
+        # A numpy array has no such lifetime: rebuilding the wx objects per
+        # paint costs about 1.5 ms (measured: Scale 0.89 ms, Bitmap 0.66 ms),
+        # which is cheap next to the 70 ms tick.
+        self._bmp_cache = (self.frame_raw, rgb)
+        return rgb
+
+    def _dump_pngs(self, rgb):
+        """Write latest.png and the burst ring.
+
+        Deliberately NOT called from the paint handler. A PNG encode measured
+        8.00 ms and this ran once per paint, inside WM_PAINT, so every repaint
+        spent most of its time compressing a diagnostic file. It is driven from
+        the timer instead, which keeps the paint path to a blit.
+        """
         now = time.time()
         try:
             from PIL import Image
@@ -1586,11 +1640,38 @@ class Viewer(wx.Frame):
         except Exception as e:
             self._last_dump = now + 5.0            # back off if it keeps failing
             self.q.put(("log", "frame dump failed: %r" % (e,)))
-        vw = min(2 * self.W, 820)
-        vh = int(vw * self.H / self.W)
-        bmp = wx.Bitmap(i2.Scale(vw, vh, wx.IMAGE_QUALITY_NEAREST))
-        self._bmp_cache = (self.frame_raw, bmp)
-        return bmp
+
+    def _to_bitmap(self, rgb):
+        """numpy RGB -> wx.Bitmap, built fresh every paint.
+
+        Sized to the panel's ACTUAL client size. It used to be
+        min(2*self.W, 820), which is 820 px wide regardless of how wide the
+        panel really is, so the bitmap never matched the widget it was drawn
+        into: it was clipped on one axis and left an undrawn black strip on the
+        other. Any resize then moved that black strip, which reads as flicker.
+        """
+        try:
+            w, h = self.video.GetClientSize()
+        except Exception:
+            w = h = 0
+        if w <= 0 or h <= 0:
+            w, h = IMG_W, IMG_H
+        # Hold the buffer on the instance. wx.Image(w, h, bytes) is not
+        # guaranteed to copy what it is handed, and rgb.tobytes() is a
+        # temporary that is released the moment this function returns - leaving
+        # the image, and anything scaled from it, pointing at freed memory.
+        #
+        # This is the flat blue frame on screen. Everything measurable said the
+        # data was clean: 420 consecutive raw frames contained ZERO that were
+        # near-constant after the reference was subtracted (minimum span 279 DL,
+        # minimum std 83.5), and the burst ring - written from this very array -
+        # showed a normal picture in 12 of 12 slots. So the corruption had to be
+        # between rgb and the screen, and it was intermittent and silent, which
+        # is the signature of a dangling buffer rather than bad data.
+        buf = np.ascontiguousarray(rgb, dtype=np.uint8).tobytes()
+        self._rgb_buf = buf
+        i2 = wx.Image(IMG_W, IMG_H, buf)
+        return wx.Bitmap(i2.Scale(int(w), int(h), wx.IMAGE_QUALITY_NEAREST))
 
     # _draw_bitmap used to live here. It built the bitmap AFTER the caller had
     # already cleared to black, so a frame that failed to build left the window
@@ -1751,6 +1832,19 @@ class Viewer(wx.Frame):
                         self.push_status("capturing flat %d/%d - hold still..." % (
                             len(self.ffc_collect), FFC_FRAMES))
                 self.video.Refresh()
+                # Build the display array HERE, on the timer, not in the paint
+                # handler. on_paint used to run the whole pipeline whenever the
+                # cache missed, so its cost alternated between ~5 ms (miss) and
+                # ~1.5 ms (hit) from one paint to the next; flicker tracked that
+                # alternation. Building here means the paint handler only ever
+                # converts and blits, at a constant cost.
+                try:
+                    rgb = self._bmp()
+                except Exception:
+                    self._show_fatal("bmp build", sys.exc_info())
+                    rgb = None
+                if rgb is not None:
+                    self._dump_pngs(rgb)
             elif kind == "status":
                 self.push_status(payload)
             elif kind == "error":
