@@ -140,8 +140,49 @@ check(build_at > 0 and clear_at > 0, "on_paint builds a bitmap and clears")
 check(build_at < clear_at,
       "the bitmap is built BEFORE dc.Clear(), so a missing frame cannot "
       "leave the window black")
-check("if bmp is None" in src,
+check("if rgb is None" in src or "if bmp is None" in src,
       "and it returns without clearing when there is nothing to draw")
+
+print("\n4. a throw anywhere in the draw must be recorded, not silent")
+# The blank-panel symptom was silent because only _bmp() was wrapped; the
+# wx.Image/Scale/Bitmap/DrawBitmap calls that were actually failing were not,
+# and in a windowed build an event-handler exception goes to a stderr nobody
+# sees - so the panel went black with no error anywhere.
+draw_at = src.find("dc.DrawBitmap")
+check(draw_at > 0, "on_paint draws the bitmap")
+wrapped = src[:draw_at]
+check(wrapped.count("try:") >= 2,
+      "the draw is inside its own try, not just the bitmap build "
+      "(found %d try blocks before DrawBitmap)" % wrapped.count("try:"))
+check("_show_fatal(\"draw\"" in src,
+      "and a failure in the draw is logged via _show_fatal")
+
+print("\n5. the cache must hold a numpy array, never a wx object")
+bmp_fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef) and n.name == "_bmp")
+bsrc = ast.get_source_segment(TEXT, bmp_fn) or ""
+check("self._bmp_cache = (self.frame_raw, rgb)" in bsrc,
+      "_bmp caches the numpy array")
+# only the body of _bmp - get_source_segment can over-reach on a function whose
+# last statement is a long expression, so bound it by its own line range
+_b0, _b1 = bmp_fn.lineno, bmp_fn.end_lineno
+# strip comments: the explanatory comment in _bmp names wx.Bitmap and wx.Image
+# when describing what the code USED to do, and matching that prose would make
+# this check pass or fail for the wrong reason
+_body = "\n".join(l for l in TEXT.splitlines()[_b0 - 1:_b1]
+                  if not l.strip().startswith("#"))
+check("wx.Bitmap" not in _body and "wx.Image" not in _body,
+      "_bmp creates no wx objects - the cached GDI object was the suspect")
+tob = next((n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "_to_bitmap"), None)
+check(tob is not None, "_to_bitmap builds the wx.Bitmap per paint")
+dump = next((n for n in ast.walk(tree)
+             if isinstance(n, ast.FunctionDef) and n.name == "_dump_pngs"), None)
+check(dump is not None, "the PNG writes live in their own method")
+if tob is not None and dump is not None:
+    check("im.save" not in bsrc,
+          "and _bmp no longer encodes a PNG - an 8.00 ms encode ran inside "
+          "WM_PAINT once per paint")
 
 print()
 if FAIL:
