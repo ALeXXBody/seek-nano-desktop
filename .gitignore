@@ -7,3 +7,21 @@ base/
 base.apk/
 build/
 __pycache__/
+
+# --- viewer build and runtime output ---
+# PyInstaller writes these; the canonical build recipe is
+# .github/workflows/build.yml, not a generated spec.
+dist/
+SeekNano.spec
+
+# Third-party or locally-built binaries. libusb-1.0.dll is LGPL and belongs in
+# the release zip, not in git; the two seeknano*.dll are built from
+# src/transport and are outputs, not sources.
+*.dll
+
+# Written by the running viewer at ~frame rate. Diagnostic, not source.
+burst_*.png
+latest.png
+seeknano_crash.log
+seeknano_verbose.log
+nuc_out/
