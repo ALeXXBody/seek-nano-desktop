@@ -1169,8 +1169,23 @@ class Viewer(wx.Frame):
         bank = np.stack(self.ffc_collect).astype(np.float32)
         self.ffc = bank.mean(axis=0)
         self.ffc_collect = None
-        self.ffc_ok = True          # freshly captured, re-checked on live data
-        self.ffc_gain = self.last_gain
+        # Do NOT trust a fresh capture. This used to set ffc_ok = True, on the
+        # reasonable-sounding assumption that a reference you just took must be
+        # good. It is not: a capture taken while the camera was not actually on
+        # a uniform surface bakes the scene into the reference, and subtracting
+        # it then injects that scene as speckle everywhere. Measured on the
+        # reference that produced the visible artefacts, over 75 consecutive
+        # gain-3 frames:
+        #
+        #     neighbour |dx| RAW        240.4 DL
+        #     neighbour |dx| AFTER FFC   334.0 DL
+        #     frames where it helps      0 of 75
+        #
+        # Leaving ffc_ok as None lets _validate_ffc judge it on live data like
+        # any other, which is what the gate is for. Setting it True disabled the
+        # gate for precisely the case most likely to need it.
+        self.ffc_ok = None
+        self.ffc_gain = None
         self.flat_btn.Enable()
         try:
             np.clip(np.rint(self.ffc), 0, 65535).astype("<u2").tofile(FFC_NAME)
@@ -1484,7 +1499,14 @@ class Viewer(wx.Frame):
         raw_dx = float(np.abs(np.diff(img, axis=1)).mean())
         fixed = _apply_ffc(img, self.ffc)
         fix_dx = float(np.abs(np.diff(fixed, axis=1)).mean())
-        self.ffc_ok = fix_dx < raw_dx
+        # Require a clear margin, not merely "no worse". Judged on a single
+        # frame, a reference that is roughly break-even can pass and fail on
+        # successive frames, which switches the correction on and off and puts
+        # the speckle back. A good reference is worth far more than this - a
+        # fresh wall capture measures 240 DL down to a few tens - so demanding
+        # 10% costs nothing when the reference is good and rejects the marginal
+        # ones that cause artefacts.
+        self.ffc_ok = fix_dx < raw_dx * 0.90
         if self.ffc_ok:
             self.ffc_gain = gain
             self.q.put(("log", "flat reference accepted at gain %s: noise "
