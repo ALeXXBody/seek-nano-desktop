@@ -753,6 +753,43 @@ def anchors_save(anchors):
         return False
 
 
+def ffc_gain_path(gain):
+    """One reference PER GAIN (see Viewer wiring: the phone app re-derives
+    its flat per exposure via the shutter; holding a single gain-locked
+    file made every launch re-capture)."""
+    return "ffc_g%d.raw" % int(gain)
+
+
+def ffc_bank_save(gain, ref):
+    try:
+        np.clip(np.rint(ref), 0, 65535).astype("<u2").tofile(ffc_gain_path(gain))
+        return True
+    except Exception:
+        return False
+
+
+def ffc_bank_load(gain):
+    try:
+        raw = np.fromfile(ffc_gain_path(gain), dtype="<u2")
+    except OSError:
+        return None
+    if raw.size != IMG_W * IMG_H:
+        return None
+    return raw.reshape(IMG_H, IMG_W).astype(np.float32)
+
+
+def ffc_bank_clear():
+    removed = 0
+    try:
+        for fn in os.listdir("."):
+            if fn.startswith("ffc_g") and fn.endswith(".raw"):
+                os.remove(fn)
+                removed += 1
+    except OSError:
+        pass
+    return removed
+
+
 def dl_to_c(dl, anchors):
     """Corrected DL -> °C through the user's anchor points.
 
@@ -2017,6 +2054,12 @@ class Viewer(wx.Frame):
             os.remove(FFC_GAIN)
         except OSError:
             pass
+        # the per-gain bank must go too, or the cleared flat resurrects at
+        # the next gain change
+        removed = ffc_bank_clear()
+        if removed:
+            self.q.put(("log", "flat bank: %d per-gain reference(s) removed"
+                               % removed))
         try:
             os.remove(BAD_NAME)
         except OSError:
@@ -2053,6 +2096,10 @@ class Viewer(wx.Frame):
             # record the gain it was taken at, so it is never applied at another
             with open(FFC_GAIN, "w") as fh:
                 fh.write(str(self.last_gain))
+            # and into the bank: one reference per gain, restored automatically
+            # whenever the camera shows that gain again
+            if self.last_gain is not None:
+                ffc_bank_save(self.last_gain, self.ffc)
             # Save the individual frames too, not just their average. The
             # average is all the display needs, but it discards the only
             # evidence that separates a flickering defective element from one
@@ -3146,6 +3193,18 @@ class Viewer(wx.Frame):
                     self.push_status("AGC settling (gain %d)..." % hdr[2])
                     continue
                 self.shown_gain = hdr[2]
+                # gain changed (or a fresh session): restore the banked
+                # reference for THIS gain if one exists - it is then judged
+                # on live data by _validate_ffc like any other
+                if self.ffc is None or self.ffc_gain != hdr[2]:
+                    banked = ffc_bank_load(hdr[2])
+                    if banked is not None:
+                        self.ffc = banked
+                        self.ffc_gain = hdr[2]
+                        self.ffc_ok = None   # judged on the next live frame
+                        self.flat_btn.Disable()
+                        self.q.put(("log", "flat for gain %d restored from the "
+                                           "bank" % hdr[2]))
                 if self.ffc is None and len(self.bg_frames) < BG_FRAMES:
                     # The bank is fed ONLY from frames that already passed the
                     # gain lock, so it can never contain a startup transient.

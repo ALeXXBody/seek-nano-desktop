@@ -431,6 +431,41 @@ class TestRecordReplayCsvAnchors(unittest.TestCase):
         got = [item for item in q.queue if item[0] == "frame"]
         self.assertGreaterEqual(len(got), 6)
 
+    def test_flat_bank_roundtrip_and_clear(self):
+        import numpy as np_
+        ref = np_.full((240, 320), 3300.0, np_.float32)
+        self.assertTrue(viewer.ffc_bank_save(3, ref))
+        loaded = viewer.ffc_bank_load(3)
+        self.assertEqual(loaded.shape, (240, 320))
+        self.assertAlmostEqual(float(loaded.mean()), 3300.0, places=1)
+        # another gain's file, to prove the clear is per-gain indiscriminate
+        self.assertTrue(viewer.ffc_bank_save(20, ref))
+        self.assertEqual(viewer.ffc_bank_clear(), 2)
+        self.assertIsNone(viewer.ffc_bank_load(3))
+        self.assertIsNone(viewer.ffc_bank_load(20))
+
+    def test_flat_bank_roundtrip_and_clear(self):
+        import numpy as np_
+        ref = np_.full((240, 320), 3300.0, np_.float32)
+        self.assertTrue(viewer.ffc_bank_save(3, ref))
+        loaded = viewer.ffc_bank_load(3)
+        self.assertEqual(loaded.shape, (240, 320))
+        self.assertAlmostEqual(float(loaded.mean()), 3300.0, places=1)
+        # another gain's file, to prove the clear is per-gain indiscriminate
+        self.assertTrue(viewer.ffc_bank_save(20, ref))
+        self.assertEqual(viewer.ffc_bank_clear(), 2)
+        self.assertIsNone(viewer.ffc_bank_load(3))
+        self.assertIsNone(viewer.ffc_bank_load(20))
+
+    def test_clear_flat_removes_the_bank(self):
+        # source contract: on_clear_flat must call ffc_bank_clear, or the
+        # cleared reference resurrects on the next gain change
+        p = os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "app", "viewer.py")
+        src = open(p, encoding="utf-8").read()
+        self.assertIn("removed = ffc_bank_clear()", src)
+        self.assertIn("flat for gain %d restored", src)
+
     def test_csv_export(self):
         import numpy as _np
         import tempfile
