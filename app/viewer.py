@@ -2287,8 +2287,14 @@ class Viewer(wx.Frame):
                                  else float("nan")),
                                 (self._raw_p[1] if getattr(self, "_raw_p", None)
                                  else float("nan")),
-                                self.lo_ema, self.hi_ema,
-                                self.hi_ema - self.lo_ema,
+                                (self.lo_ema if self.lo_ema is not None
+                                 else float("nan")),
+                                (self.hi_ema if self.hi_ema is not None
+                                 else float("nan")),
+                                ((self.hi_ema - self.lo_ema)
+                                 if (self.lo_ema is not None
+                                     and self.hi_ema is not None)
+                                 else float("nan")),
                                 getattr(self, "ffc_ok", None),
                                 getattr(self, "stretch_skips", 0)))
             except Exception:
@@ -2523,8 +2529,12 @@ class Viewer(wx.Frame):
         if f is not None:
             dc.SetFont(f)
         dc.SetTextForeground(wx.Colour(*THEME["muted"]))
-        dc.DrawText("%d DL" % getattr(self, "lo_ema", 0), x, y - 16)
-        hi = "%d DL" % getattr(self, "hi_ema", 0)
+        # `or 0`, not getattr(..., 0): the attribute EXISTS but is None until the
+        # first frame completes its stretch, and getattr's default only applies
+        # when the attribute is missing. A rejected frame returns before the
+        # stretch runs, so this genuinely is None here, and "%d" % None raises.
+        dc.DrawText("%d DL" % (self.lo_ema or 0), x, y - 16)
+        hi = "%d DL" % (self.hi_ema or 0)
         hw, _hh = dc.GetTextExtent(hi)
         dc.DrawText(hi, x + bw - hw, y - 16)
         dc.DrawText("ironbow", x + bw + 10, y)
