@@ -21,6 +21,13 @@ TREE = ast.parse(SRC)
 NS = {"np": np, "time": time, "os": os, "sys": sys,
       "__file__": r"C:\a\src\app\viewer.py", "__name__": "viewer",
       "struct": __import__("struct")}
+
+
+def _vlog(*_a, **_k):
+    pass
+
+
+NS["_vlog"] = _vlog
 for node in TREE.body:
     if isinstance(node, ast.Assign):
         try:
@@ -104,21 +111,31 @@ check(z[118] > 5 * max(z[np.arange(IH) != 118].max(), 1e-6),
       "and dwarfs every clean row (next highest z %.1f)"
       % z[np.arange(IH) != 118].max())
 p = P()
-p.frame_raw = np.clip(bad, 0, 65535).astype(np.uint16)
+# frame_raw is the raw USB payload: bytes, not an array. Passing an ndarray
+# here let the dump code be written against the wrong type and every real
+# capture failed with UFuncTypeError.
+p.frame_raw = np.clip(bad, 0, 65535).astype(np.uint16).tobytes()
 p._scanline_health(bad)
 dumps = sorted(f for f in os.listdir(".") if f.startswith("scanline_fault_"))
 check(len(dumps) == 1, "a dump was written (%s)" % (dumps or "none"))
+check(not any("save failed" in m[1] for m in p.q.msgs),
+      "and the save did not fail (%r)" % ([m[1] for m in p.q.msgs][:2]))
 check(any("scanline fault" in m[1] for m in p.q.msgs),
       "and the fault was reported on screen (%r)"
       % ([m[1] for m in p.q.msgs][:1]))
 if dumps:
-    raw = open(dumps[0], "rb").read()
+    blob = open(dumps[0], "rb").read()
     import struct
-    n, zint, row = struct.unpack("<IHH", raw[:8])
-    px = np.frombuffer(raw[8:], dtype="<u2").reshape(IH, IW)
-    check(px.shape == (IH, IW), "the dump holds a full %dx%d frame" % (IW, IH))
+    n, zint, row = struct.unpack("<IHH", blob[:8])
+    body = blob[8:]
+    check(len(body) == IH * IW * 2,
+          "the dump carries a full %d B frame payload, not a header stub"
+          % (IH * IW * 2))
+    px = np.frombuffer(body, dtype="<u2").reshape(IH, IW)
+    check(px.shape == (IH, IW), "and reshapes to %dx%d" % (IW, IH))
     check(row == 118, "and it names the offending row (%d)" % row)
-    check(np.array_equal(px, p.frame_raw), "and the frame is byte-identical")
+    check(np.array_equal(px, np.frombuffer(p.frame_raw, dtype=np.uint16)
+                         .reshape(IH, IW)), "and the frame is byte-identical")
     os.remove(dumps[0])
 
 print("\n3. a 5-second rate limit stops a persistent fault flooding the disk")

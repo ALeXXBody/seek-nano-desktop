@@ -2581,15 +2581,18 @@ class Viewer(wx.Frame):
                 # relative, like every other dump: the app chdirs to the exe
                 # directory at startup, so this lands next to SeekNano.exe
                 p = "scanline_fault_%d.raw" % n
+                # self.frame_raw is the raw USB payload: bytes. np.clip on a
+                # bytes object raises UFuncTypeError, so every earlier attempt
+                # wrote a header-only 8-byte stub and the fault was never
+                # actually captured - the log said "save failed" and moved on.
+                raw = np.frombuffer(self.frame_raw, dtype=np.uint8)
                 with open(p, "wb") as fh:
-                    fh.write(struct.pack("<I", n))
-                    fh.write(struct.pack("<HH", SCAN_FAULT_Z_INT, row))
-                    fh.write(np.clip(self.frame_raw, 0, 65535)
-                             .astype("<u2").tobytes())
+                    fh.write(struct.pack("<IHH", n, SCAN_FAULT_Z_INT, row))
+                    fh.write(raw.tobytes())
                 self.q.put(("log", "scanline fault: row %d at z %.1f -> %s"
                                    % (row, zmax, os.path.basename(p))))
-                _vlog("SCANFAULT", "row=%d z=%.1f median=%.1f n=%d"
-                      % (row, zmax, med, n))
+                _vlog("SCANFAULT", "row=%d z=%.1f median=%.1f n=%d bytes=%d"
+                      % (row, zmax, med, n, raw.size))
             except Exception as e:
                 self.q.put(("log", "scanline fault save failed: %r" % (e,)))
 
