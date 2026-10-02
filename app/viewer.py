@@ -500,6 +500,7 @@ GAIN_LOCK_FRAMES = 3
 HOTSPOT_MODES = ("off", "mark", "outline", "track", "alarm")
 HOTSPOT_SENS = 1.0        # scales how far above the scene a region must sit
 HOTSPOT_MAX = 5           # how many to report at once
+SPOT_STABLE = 3           # frames of evidence before a region is drawn
 HOTSPOT_HOLD = 1.6        # "track": seconds a spot stays in the history
 
 
@@ -2548,10 +2549,31 @@ class Viewer(wx.Frame):
         # when hot-spots were enabled. A real hotspot is there for seconds.
         seen = dict(getattr(self, "_spot_seen", {}))
         keys = [(int(g["y"]) // 8, int(g["x"]) // 8) for g in self.spots]
+        # A SATURATING counter: +1 while seen, -1 while not, clamped at
+        # SPOT_STABLE (3). Three frames of evidence qualifies a region and it
+        # then stays qualified, so a real hotspot cannot blink.
+        #
+        # The previous version incremented without bound and deleted the key at
+        # 90, which reset the counter to zero: a motionless hotspot drew on
+        # frames 1-90, blacked out for 2 frames, then recovered, forever -
+        # measured 0.08 s of dropout repeating every 3.6 s on a perfectly
+        # still target. That is the "artifacts" the overlay was blamed for.
+        #
+        # Note the order matters and so does the membership test. The decay must be
+        # applied only to cells NOT seen this frame: decaying every cell and
+        # then incrementing the seen ones nets zero every frame, so a
+        # continuously present hotspot is pinned at 1 and the overlay never
+        # draws at all. With the `not in keys` guard the seen cell climbs
+        # 1, 2, 3 and then rests at SPOT_STABLE, and only a region that
+        # genuinely disappears lets its counter fall.
+        for k_ in list(seen):
+            if k_ not in keys:
+                seen[k_] = max(0, seen[k_] - 1)
         for k_ in keys:
-            seen[k_] = seen.get(k_, 0) + 1
-        stable = [g for g, k_ in zip(self.spots, keys) if seen.get(k_, 0) >= 3]
-        self._spot_seen = {k: v for k, v in seen.items() if v < 90}
+            seen[k_] = min(SPOT_STABLE, seen.get(k_, 0) + 1)
+        stable = [g for g, k_ in zip(self.spots, keys)
+                  if seen.get(k_, 0) >= SPOT_STABLE]
+        self._spot_seen = {k: v for k, v in seen.items() if v > 0}
         for g in stable:
             self.spot_hist.append((now, g["y"], g["x"], g["peak"]))
         # forget anything older than the hold time
