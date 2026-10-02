@@ -8,6 +8,7 @@ No hardware or live capture data required.
 """
 import importlib.util
 import inspect
+import numpy as np
 import os
 import queue
 import sys
@@ -259,6 +260,48 @@ class TestDllCandidatesOrder(unittest.TestCase):
                             if pref == "SN_"),
                         min(i for i, (path, pref) in enumerate(seen_pathed)
                             if pref == "SNLB_"))
+
+
+class TestAnalysisFeatures(unittest.TestCase):
+    """Cursor stats / line profile / isotherm - pure numpy paths."""
+
+    def test_sample_stats_window(self):
+        img = np.zeros((240, 320), np.float32)
+        img[100:104, 200:204] = 500.0
+        val, mean, lo, hi = viewer._sample_stats(img, (201, 101))
+        self.assertEqual(val, 500.0)
+        self.assertEqual(hi, 500.0)
+        self.assertGreater(mean, 0)
+        self.assertEqual(lo, 0.0)
+
+    def test_sample_stats_out_of_range(self):
+        self.assertIsNone(viewer._sample_stats(np.zeros((4, 4), np.float32),
+                                               (99, 99)))
+
+    def test_line_profile_endpoints(self):
+        img = np.zeros((240, 320), np.float32)
+        img[:, :] = 100.0
+        prof = viewer._line_profile(img, (0, 0), (319, 0))
+        self.assertEqual(prof.shape, (192,))
+        self.assertTrue((prof == 100.0).all())
+
+    def test_line_profile_bilinear_half_step(self):
+        # a line straddling two rows must return the average
+        img = np.zeros((4, 4), np.float32)
+        img[1, :] = 0.0
+        img[2, :] = 100.0
+        prof = viewer._line_profile(img, (0, 1.5), (3, 1.5), n=16)
+        self.assertTrue(np.allclose(prof, 50.0, atol=1e-3))
+
+    def test_isotherm_state_shape(self):
+        v = viewer.Viewer.__new__(viewer.Viewer)
+        # the shipped defaults: isotherm off, no threshold
+        self.assertFalse(getattr(v, "iso_on", False))
+        # a threshold set through the key path turns the band on
+        v.iso_thr = 42.0
+        v.iso_on = True
+        self.assertTrue(v.iso_on)
+        self.assertEqual(v.iso_thr, 42.0)
 
 
 class TestDumpGate(unittest.TestCase):

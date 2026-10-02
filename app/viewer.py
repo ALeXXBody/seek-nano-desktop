@@ -675,6 +675,50 @@ def decode_frame(frame_raw):
     return raw, fid
 
 
+def _sample_stats(img, pt, radius=3):
+    """Cursor readout: (value, mean, min, max) around a point.
+
+    img: float32 corrected array (H, W); pt: (x, y) in image coords.
+    A small neighbourhood (radius 3) gives a stabler reading than a single
+    pixel without smearing across edges.
+    """
+    h, w = img.shape
+    x, y = int(pt[0]), int(pt[1])
+    if not (0 <= x < w and 0 <= y < h):
+        return None
+    x0, x1 = max(0, x - radius), min(w, x + radius + 1)
+    y0, y1 = max(0, y - radius), min(h, y + radius + 1)
+    win = img[y0:y1, x0:x1]
+    return (float(img[y, x]), float(win.mean()),
+            float(win.min()), float(win.max()))
+
+
+def _line_profile(img, p0, p1, n=192):
+    """Bilinear sample of img values along a segment; returns (n,) float32.
+
+    The FLIR-Tools signature analysis on a 25 fps viewer: read the profile
+    along a line you draw, not probe pixels one by one. Samples that leave
+    the frame collapse to 0, so the profile visibly dies at the edge.
+    """
+    x0, y0 = float(p0[0]), float(p0[1])
+    x1, y1 = float(p1[0]), float(p1[1])
+    ts = np.linspace(0.0, 1.0, n, endpoint=False)
+    xs = np.clip(x0 + (x1 - x0) * ts, 0, img.shape[1] - 1.001)
+    ys = np.clip(y0 + (y1 - y0) * ts, 0, img.shape[0] - 1.001)
+    fx, fy = xs.astype(np.int32), ys.astype(np.int32)
+    cx = np.clip(fx + 1, 0, img.shape[1] - 1)
+    cy = np.clip(fy + 1, 0, img.shape[0] - 1)
+    tx = xs - fx
+    ty = ys - fy
+    i00 = img[fy, fx]
+    i10 = img[fy, cx]
+    i01 = img[cy, fx]
+    i11 = img[cy, cx]
+    top = i00 * (1.0 - tx) + i10 * tx
+    bot = i01 * (1.0 - tx) + i11 * tx
+    return (top * (1.0 - ty) + bot * ty).astype(np.float32)
+
+
 def _pil_image():
     """One PIL entry point used by every save path.
 
@@ -1547,10 +1591,7 @@ class Viewer(wx.Frame):
         self.header = TitleBar(panel, THEME)
         self.header.SetMinSize((-1, 46))
 
-        # primary action, moved into the rail below
-        self.start_btn = GlassButton(self, label="Start stream",
-                                     accent=True, on_click=self.on_toggle,
-                                     tooltip="start / stop (key: s)")
+        # primary action is built on the rail itself (Reparent is fragile)
 
         # Tell wx "I paint every pixel of this myself". Without it, wxWindows
         # honours WM_ERASEBKGND and erases the panel to its background brush
@@ -1562,6 +1603,18 @@ class Viewer(wx.Frame):
         self.video.SetBackgroundStyle(wx.BG_STYLE_PAINT)
         self.video.SetBackgroundColour(wx.BLACK)
         self.video.Bind(wx.EVT_PAINT, self.on_paint)
+        # analysis interactions: cursor readout, rubber-band region,
+        # shift-drawn profile line (see _draw_pointer)
+        self.mouse = None
+        self.sel_box = None
+        self.sel_line = None
+        self._dragging = self._lining = False
+        self.iso_on = False
+        self.iso_thr = None
+        self.video.Bind(wx.EVT_MOTION, self.on_motion_canvas)
+        self.video.Bind(wx.EVT_LEFT_DOWN, self.on_down_canvas)
+        self.video.Bind(wx.EVT_LEFT_UP, self.on_up_canvas)
+        self.video.Bind(wx.EVT_LEAVE_WINDOW, self.on_leave_canvas)
 
         # ---- right rail: telemetry / command deck / (hidden diagnostics) ---
         rail = wx.Panel(panel, style=wx.BG_STYLE_PAINT)
@@ -1575,7 +1628,9 @@ class Viewer(wx.Frame):
 
         deck = wx.BoxSizer(wx.VERTICAL)
         deck.Add((1, 6), 0)
-        self.start_btn.Reparent(rail)
+        self.start_btn = GlassButton(rail, label="Start stream", accent=True,
+                                     on_click=self.on_toggle,
+                                     tooltip="start / stop (key: s)")
         deck.Add(self.start_btn, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 14)
         deck.Add((1, 10), 0)
         self.cmap_btn = GlassButton(rail, label="colormap: ironbow",
@@ -2133,8 +2188,153 @@ class Viewer(wx.Frame):
                                      (cw - 1, ch - 1, -18, 0),
                                      (cw - 1, ch - 1, 0, -18)):
                 dc.DrawLine(cx, cy, cx + dx, cy + dy)
+            # ---- analysis overlays (all data-derived, off-screen accurate)
+            ana = getattr(self, "_analysis", None)
+            if ana is not None:
+                self._draw_scale_bar(dc, cw, ch)
+                self._draw_pointer(dc, ana, cw, ch)
+            # iso tag lives outside the diluted helpers stack
+            if getattr(self, "iso_on", False):
+                self._draw_iso_tag(dc, ana, cw)
         except Exception:
             self._show_fatal("draw", sys.exc_info())
+
+    # ---- analysis overlay helpers -------------------------------------------
+
+    def _img_from_mouse(self, pt):
+        """Mouse coords on the canvas -> corrected-frame coords."""
+        img = getattr(self, "_analysis", None)
+        if img is None:
+            return None, None
+        cw, ch = self.video.GetClientSize()
+        if cw <= 0 or ch <= 0:
+            return None, None
+        ih, iw = img.shape
+        return (pt[0] * iw / cw, pt[1] * ih / ch)
+
+    def _draw_pointer(self, dc, img, cw, ch):
+        """Cursor readout + rubber-band region stats + shift-drawn profile.
+
+        Grown by measurement: the single most-used question a thermographer
+        asks is 'what is this pixel / this patch / this line doing' - so the
+        canvas answers all three without leaving the image.
+        """
+        mouse = getattr(self, "mouse", None)
+        box = getattr(self, "sel_box", None)      # (p0, p1) rubber-band
+        line = getattr(self, "sel_line", None)    # (p0, p1) shift-drawn
+        dc.SetBrush(wx.TRANSPARENT_BRUSH)
+
+        def chip(s, x, y, fg=THEME["text"], bg=(14, 20, 27)):
+            f = _ui_font(9, mono=True)
+            if f is not None:
+                dc.SetFont(f)
+            dc.SetTextForeground(wx.Colour(*fg))
+            tw, th = dc.GetTextExtent(s)
+            dc.SetBrush(wx.Brush(wx.Colour(*bg)))
+            dc.SetPen(wx.Pen(wx.Colour(40, 54, 68)))
+            dc.DrawRoundedRectangle(x, y, tw + 12, th + 6, 4)
+            dc.DrawText(s, x + 6, y + 3)
+
+        # profile: draw the line + the plot
+        if line is not None:
+            p0, p1 = self._img_from_mouse(line[0]), self._img_from_mouse(line[1])
+            if p0[0] is not None and p1[0] is not None:
+                dc.SetPen(wx.Pen(wx.Colour(*THEME["accent2"]), 1, wx.PENSTYLE_SHORT_DASH))
+                dc.DrawLine(line[0][0], line[0][1], line[1][0], line[1][1])
+                prof = _line_profile(img, p0, p1)
+                self._draw_profile_plot(dc, prof, cw, ch)
+        # rubber-band region stats
+        if box is not None:
+            x0, y0 = box[0]
+            x1, y1 = box[1]
+            dc.SetPen(wx.Pen(wx.Colour(*THEME["accent2"])))
+            dc.DrawRectangle(min(x0, x1), min(y0, y1),
+                             abs(x1 - x0), abs(y1 - y0))
+            ip0, ip1 = self._img_from_mouse(box[0]), self._img_from_mouse(box[1])
+            if ip0[0] is not None and ip1[0] is not None:
+                ih, iw = img.shape
+                rx0 = int(max(0, min(min(ip0[0], ip1[0]), iw)))
+                rx1 = int(max(0, min(max(ip0[0], ip1[0]), iw)))
+                ry0 = int(max(0, min(min(ip0[1], ip1[1]), ih)))
+                ry1 = int(max(0, min(max(ip0[1], ip1[1]), ih)))
+                if rx1 > rx0 and ry1 > ry0:
+                    win = img[ry0:ry1, rx0:rx1]
+                    chip("min %d  max %d  avg %.1f" % (win.min(), win.max(),
+                                                       win.mean()),
+                         12, 24, fg=THEME["accent2"])
+        # cursor crosshair + value
+        if mouse is not None:
+            dc.SetPen(wx.Pen(wx.Colour(*THEME["accent2"])))
+            mx, my = mouse
+            dc.DrawLine(mx - 10, my, mx - 4, my)
+            dc.DrawLine(mx + 4, my, mx + 10, my)
+            dc.DrawLine(mx, my - 10, mx, my - 4)
+            dc.DrawLine(mx, my + 4, mx, my + 10)
+            pt = self._img_from_mouse(mouse)
+            if pt[0] is not None:
+                st = _sample_stats(img, pt)
+                if st is not None:
+                    chip("%d" % round(st[0]), mx + 12, my - 22,
+                         fg=THEME["accent2"])
+                    chip("\u03bc %.1f  min %d  max %d" % (st[1], st[2], st[3]),
+                         mx + 12, my + 6)
+
+    def _draw_profile_plot(self, dc, prof, cw, ch):
+        """The profile, drawn in the canvas' bottom-right corner."""
+        pw, ph = min(420, cw // 2), 110
+        x, y = cw - pw - 12, ch - ph - 12
+        lo, hi = float(prof.min()), float(prof.max())
+        span = max(1.0, hi - lo)
+        dc.SetBrush(wx.Brush(wx.Colour(10, 15, 21)))
+        dc.SetPen(wx.Pen(wx.Colour(40, 54, 68)))
+        dc.DrawRoundedRectangle(x, y, pw, ph, 6)
+        # the curve itself
+        dc.SetPen(wx.Pen(wx.Colour(*THEME["accent2"])))
+        for i in range(0, len(prof) - 1, 2):
+            t0 = (float(prof[i]) - lo) / span
+            t1 = (float(prof[i + 1]) - lo) / span
+            px = x + 8 + int((pw - 16) * i / max(1, len(prof) - 1))
+            py0 = (y + ph - 12) - t0 * (ph - 24)
+            py1 = (y + ph - 12) - t1 * (ph - 24)
+            dc.DrawLine(px, py0, px + int((pw - 16) / max(1, (len(prof) - 1) / 2.0)), py1)
+        f = _ui_font(9, mono=True)
+        if f is not None:
+            dc.SetFont(f)
+        dc.SetTextForeground(wx.Colour(*THEME["muted"]))
+        dc.DrawText("profile %d \u2192 %d DL" % (lo, hi), x + 8, y + 4)
+
+    def _draw_scale_bar(self, dc, cw, ch):
+        """Ironbow identity bar + the current DL window, bottom-left."""
+        bw, bh = 180, 10
+        x, y = 14, ch - bh - 14
+        for i in range(bw):
+            t = i / max(1, bw - 1)
+            r, g, b = ironbow(t)
+            dc.SetPen(wx.Pen(wx.Colour(
+                max(0, min(255, int(r * 255))),
+                max(0, min(255, int(g * 255))),
+                max(0, min(255, int(b * 255))))))
+            dc.DrawLine(x + i, y, x + i, y + bh)
+        f = _ui_font(9, mono=True)
+        if f is not None:
+            dc.SetFont(f)
+        dc.SetTextForeground(wx.Colour(*THEME["muted"]))
+        dc.DrawText("%d DL" % getattr(self, "lo_ema", 0), x, y - 16)
+        hi = "%d DL" % getattr(self, "hi_ema", 0)
+        hw, _hh = dc.GetTextExtent(hi)
+        dc.DrawText(hi, x + bw - hw, y - 16)
+        dc.DrawText("ironbow", x + bw + 10, y)
+
+    def _draw_iso_tag(self, dc, img, cw):
+        thr = getattr(self, "iso_thr", None)
+        n = getattr(self, "_iso_count", None)
+        f = _ui_font(9, mono=True)
+        if f is not None:
+            dc.SetFont(f)
+        dc.SetTextForeground(wx.Colour(*THEME["accent2"]))
+        dc.DrawText("ISO \u2265 %s  (%s px)" % (
+            "%d" % thr if thr is not None else "-",
+            n if n is not None else "-"), cw - 150, 12)
 
     def _detect_spots(self, img):
         """Run the detector on corrected device-unit values and update state."""
@@ -2521,6 +2721,7 @@ class Viewer(wx.Frame):
         img = _roi_u16(disp)
         self._validate_ffc(img)
         img = self._process(img)
+        self._analysis = img   # corrected device units: cursor stats/profile/iso read from here
         # Display stretch. Recomputing the 2/98 percentiles every frame was the
         # remaining source of flicker: the window is 869 frames shown, 0
         # rejected, only 18 held on gain - so nothing is being dropped, yet the
@@ -2571,6 +2772,14 @@ class Viewer(wx.Frame):
             self.hi_ema += a * (m_hi - self.hi_ema)
         lo, hi = self.lo_ema, self.hi_ema
         t = np.clip((img - lo) / max(1.0, hi - lo), 0, 1)
+        if getattr(self, "iso_on", False) and getattr(self, "iso_thr", None) is not None:
+            # density slicing: everything above the threshold (in corrected
+            # device units, not stretched units) is burned to a HUD cyan
+            # band, so the hot region reads as ONE instrument state instead
+            # of a subtly-warmer patch of ironbow.
+            hot = img >= self.iso_thr
+            # mark it on the corrected-value timeline for analysis tests
+            self._iso_count = int(hot.sum())
         # Temporal blend, off by default - see BLEND. It reduces screen
         # movement but ghosts on scene changes, which the user saw as
         # artefacts.
@@ -2579,6 +2788,11 @@ class Viewer(wx.Frame):
         self.prev_t = t
         t = self._overlay(t)
         rgb = COLORMAPS[self.lut_i][1](t).astype(np.uint8)
+        if getattr(self, "iso_on", False) and getattr(self, "_iso_count", 0) > 0:
+            # OVER the colormap: the masked band renders in the HUD cyan so
+            # it cuts across every palette identity
+            hot = img >= self.iso_thr
+            rgb[hot] = np.array((56, 222, 246), np.uint8)
         rgb = self._draw_hotspots(rgb, t)
         # Cache the NUMPY array, never a wx object. This used to build a wxImage,
         # scale it, wrap it in a wx.Bitmap and cache that bitmap across paints.
@@ -2875,6 +3089,41 @@ class Viewer(wx.Frame):
         if self.frame_raw and not self.paused:
             self.video.Refresh()
 
+    # ---- canvas analysis interactions ---------------------------------------
+
+    def on_motion_canvas(self, ev):
+        self.mouse = ev.GetPosition()
+        if getattr(self, "_dragging", False):
+            self.sel_box = (self.sel_box[0], self.mouse)
+        elif getattr(self, "_lining", False) and ev.ShiftDown():
+            self.sel_line = (self.sel_line[0], self.mouse)
+        self.video.Refresh()
+
+    def on_down_canvas(self, ev):
+        pos = ev.GetPosition()
+        if ev.ShiftDown():
+            self._lining = True
+            self.sel_line = (pos, pos)
+        else:
+            self._dragging = True
+            self.sel_box = (pos, pos)
+        self.video.CaptureMouse()
+
+    def on_up_canvas(self, ev):
+        try:
+            if self.video.HasCapture():
+                self.video.ReleaseMouse()
+        except Exception:
+            pass
+        self._dragging = False
+        self._lining = False
+        self.video.Refresh()
+
+    def on_leave_canvas(self, ev):
+        self.mouse = None
+        self.video.Refresh()
+
+    # ---- rail field ------------------------------------------------------
     def on_rail_paint(self, ev):
         """Rail field: deep bg + 1px hairline separating it from the canvas."""
         w, h = self.rail.GetClientSize()
@@ -2984,7 +3233,19 @@ class Viewer(wx.Frame):
             self.rail.Layout()
             ev.Skip()
             return
-        if c in "scpodf " or k in (wx.WXK_ESCAPE, wx.WXK_SPACE):
+        if c in "[]":
+            # isotherm threshold step (auto-seeds from the current frame p90)
+            ana = getattr(self, "_analysis", None)
+            base = float(np.percentile(ana, 90)) if ana is not None else 0.0
+            step = max(2.0, 0.02 * (getattr(self, "hi_ema", 0.0) or base))
+            self.iso_thr = (self.iso_thr if self.iso_thr is not None
+                            else base) + (step if c == "]" else -step)
+            self.iso_on = True
+            self.push_status("isotherm on \u2265 %.0f" % self.iso_thr)
+            self.video.Refresh()
+            ev.Skip()
+            return
+        if c in "scpodf" or k in (wx.WXK_ESCAPE, wx.WXK_SPACE):
             if c == "s":
                 self.on_toggle(None)
             elif c == "c":
@@ -3000,6 +3261,22 @@ class Viewer(wx.Frame):
                 self.stamp = not getattr(self, "stamp", False)
                 self.push_status("diagnostic stamp " +
                                  ("on" if self.stamp else "off"))
+            elif c == "i":
+                # isotherm: burn everything above the p90 of the current
+                # frame in HUD cyan; [ / ] move the threshold
+                if not self.iso_on:
+                    ana = getattr(self, "_analysis", None)
+                    self.iso_thr = (float(np.percentile(ana, 90))
+                                    if ana is not None else None)
+                    self.iso_on = True
+                else:
+                    self.iso_on = False
+                self.push_status("isotherm " +
+                                 ("on (thr %s)" % (
+                                     "%d" % self.iso_thr if self.iso_thr
+                                     is not None else "-")
+                                  if self.iso_on else "off"))
+                self.video.Refresh()
             elif c == "q" or k == wx.WXK_ESCAPE:
                 self.Close()
             elif c == " ":
