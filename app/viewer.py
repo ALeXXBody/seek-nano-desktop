@@ -501,6 +501,7 @@ HOTSPOT_MODES = ("off", "mark", "outline", "track", "alarm")
 HOTSPOT_SENS = 1.0        # scales how far above the scene a region must sit
 HOTSPOT_MAX = 5           # how many to report at once
 SPOT_STABLE = 3           # frames of evidence before a region is drawn
+SPOT_MOVE = 24            # px a region may drift and keep its stability score
 HOTSPOT_HOLD = 1.6        # "track": seconds a spot stays in the history
 
 
@@ -2547,33 +2548,39 @@ class Viewer(wx.Frame):
         # to be drawn. Detection jitter (a threshold that lands on noise)
         # made the boxes and the alarm border strobe - the "artifacts" seen
         # when hot-spots were enabled. A real hotspot is there for seconds.
-        seen = dict(getattr(self, "_spot_seen", {}))
-        keys = [(int(g["y"]) // 8, int(g["x"]) // 8) for g in self.spots]
-        # A SATURATING counter: +1 while seen, -1 while not, clamped at
-        # SPOT_STABLE (3). Three frames of evidence qualifies a region and it
-        # then stays qualified, so a real hotspot cannot blink.
+        # Track regions by last known POSITION, not by grid cell. Keying on an
+        # 8x8 cell was the real cause of the reported artifacts: a hotspot that
+        # moves 1 px per frame crosses a cell boundary every 8 px, the new cell
+        # starts its counter from zero, and the box blanks for 2 frames while it
+        # climbs back to 3. Measured: 37 blackouts in 150 frames, one every
+        # 8 px of travel. A still target hid it, which is why it looked fine
+        # until something actually moved.
         #
-        # The previous version incremented without bound and deleted the key at
-        # 90, which reset the counter to zero: a motionless hotspot drew on
-        # frames 1-90, blacked out for 2 frames, then recovered, forever -
-        # measured 0.08 s of dropout repeating every 3.6 s on a perfectly
-        # still target. That is the "artifacts" the overlay was blamed for.
-        #
-        # Note the order matters and so does the membership test. The decay must be
-        # applied only to cells NOT seen this frame: decaying every cell and
-        # then incrementing the seen ones nets zero every frame, so a
-        # continuously present hotspot is pinned at 1 and the overlay never
-        # draws at all. With the `not in keys` guard the seen cell climbs
-        # 1, 2, 3 and then rests at SPOT_STABLE, and only a region that
-        # genuinely disappears lets its counter fall.
-        for k_ in list(seen):
-            if k_ not in keys:
-                seen[k_] = max(0, seen[k_] - 1)
-        for k_ in keys:
-            seen[k_] = min(SPOT_STABLE, seen.get(k_, 0) + 1)
-        stable = [g for g, k_ in zip(self.spots, keys)
-                  if seen.get(k_, 0) >= SPOT_STABLE]
-        self._spot_seen = {k: v for k, v in seen.items() if v > 0}
+        # So each region inherits the score of whichever previous region it is
+        # closest to, within SPOT_MOVE px. Motion then carries the evidence
+        # instead of resetting it.
+        pts = [(g["y"], g["x"]) for g in self.spots]
+        prev = list(getattr(self, "_spot_pts", []))
+        prev_scores = list(getattr(self, "_spot_score", []))
+        # Nearest-neighbour inheritance: each region takes the score of the
+        # closest unmatched region from the previous frame, if it is within
+        # SPOT_MOVE. One previous region can only be inherited once.
+        scores = []
+        used = set()
+        for (cy, cx) in pts:
+            best, bd, bi = 0.0, float(SPOT_MOVE) + 1.0, None
+            for i, (py, px) in enumerate(prev):
+                if i in used or i >= len(prev_scores):
+                    continue
+                d = ((cy - py) ** 2 + (cx - px) ** 2) ** 0.5
+                if d <= SPOT_MOVE and d < bd:
+                    bd, best, bi = d, float(prev_scores[i]), i
+            if bi is not None:
+                used.add(bi)
+            scores.append(min(SPOT_STABLE, best + 1))
+        stable = [g for g, s_ in zip(self.spots, scores) if s_ >= SPOT_STABLE]
+        self._spot_score = scores
+        self._spot_pts = list(pts)
         for g in stable:
             self.spot_hist.append((now, g["y"], g["x"], g["peak"]))
         # forget anything older than the hold time

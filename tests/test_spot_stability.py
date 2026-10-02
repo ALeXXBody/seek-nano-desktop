@@ -23,7 +23,8 @@ SRC = pathlib.Path(r"C:\a\src\app\viewer.py").read_text(encoding="utf-8")
 TREE = ast.parse(SRC)
 NS = {"np": np, "time": time, "os": os, "sys": sys,
       "__file__": r"C:\a\src\app\viewer.py", "__name__": "viewer"}
-for m in re.finditer(r"^(HOTSPOT_[A-Z_0-9]*|SPOT_STABLE)\s*=\s*(.+)$", SRC, re.M):
+for m in re.finditer(
+        r"^(HOTSPOT_[A-Z_0-9]*|SPOT_STABLE|SPOT_MOVE)\s*=\s*(.+)$", SRC, re.M):
     try:
         NS[m.group(1)] = eval(m.group(2), NS)
     except Exception:
@@ -68,7 +69,8 @@ class Panel:
         self.spot_hist = []
         self.spot_alarm = 0.0
         self.spot_alarm_on = False
-        self._spot_seen = {}
+        self._spot_pts = []
+        self._spot_score = []
         self.q = Q()
         self._show_fatal = _fail
 
@@ -112,6 +114,21 @@ check(sum(jitter[10:]) >= 45,
       "a 1-px jittering hotspot stays drawn on %d of the last 50 frames"
       % sum(jitter[10:]))
 
+print("\n2b. a MOVING hotspot does not blink as it crosses cell boundaries")
+# The stability key is an 8x8 grid cell, so a drifting hotspot enters a new cell
+# and starts its counter from zero. That is the case most likely to look like
+# strobing on a real target: the box is keyed on position, not identity.
+p = Panel()
+moving = []
+for i in range(150):
+    p._detect_spots(scene(100, 140 + i))       # walks right, one px/frame
+    moving.append(bool(p.spots))
+# ignore the first 6 frames of warm-up
+holes = [i + 1 for i, v in enumerate(moving[6:], start=6) if not v]
+check(not holes,
+      "no dropout while the hotspot moves 150 px (undrawn: %s)" % (holes or "none"))
+check(sum(moving) >= 144, "drawn on %d of 150 frames" % sum(moving))
+
 print("\n3. a spot that vanishes is dropped, not held forever")
 p = Panel()
 for _ in range(40):
@@ -122,30 +139,27 @@ for _ in range(80):
 gone = len(p.spots) == 0
 check(after_on, "it was drawn while present")
 check(gone, "and is gone 80 frames after the hotspot left the scene")
-check(len(p._spot_seen) == 0,
-      "its cell was pruned from the counter (left %d entries)"
-      % len(p._spot_seen))
+check(len(getattr(p, "_spot_pts", [])) <= 1,
+      "the vanished region left %d tracked point(s), not a stale entry"
+      % len(getattr(p, "_spot_pts", [])))
 
 print("\n4. the old hard-cap bug cannot come back")
 # Check the CODE, not the prose: the comment explaining the old bug names the
 # expression it removed, so a substring search over the file gives a false
 # failure. Parse _detect_spots and look for the prune in the AST instead.
 _fn_src = ast.get_source_segment(SRC, _fn) or ""
-_prune = None
-for node in ast.walk(_fn):
-    if isinstance(node, ast.Assign) and len(node.targets) == 1:
-        # the target is self._spot_seen, so match on the source text of the
-        # assignment rather than on target shape
-        seg = ast.get_source_segment(SRC, node) or ""
-        if "_spot_seen" in seg and node.value.__class__.__name__ == "DictComp":
-            _prune = ast.get_source_segment(SRC, node.value) or ""
-check(_prune is not None and "90" not in _prune,
-      "the _spot_seen prune is now %r, not a hard cap at 90"
-      % (_prune.strip() if _prune else "missing"))
+check("_spot_seen" not in _fn_src,
+      "the capped _spot_seen counter is gone entirely")
 check(">= SPOT_STABLE" in _fn_src,
       "the draw threshold reads SPOT_STABLE, not a magic number")
 check("SPOT_STABLE" in SRC and "SPOT_STABLE = 3" in SRC,
       "SPOT_STABLE is 3, so a spot still needs 3 frames of evidence")
+# The original defect: state keyed on an 8x8 grid cell, so a moving hotspot
+# restarted its count at every boundary. Positions, not cells, now.
+check("SPOT_MOVE" in _fn_src,
+      "regions are tracked by position within SPOT_MOVE, not by grid cell")
+check("// 8" not in _fn_src,
+      "no 8-px grid-cell keying left in _detect_spots")
 
 print()
 if FAIL:
