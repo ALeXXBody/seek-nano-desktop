@@ -469,7 +469,12 @@ BLEND = 1.0           # temporal blend weight; 1.0 = off. See below.
 # shifts, and the user reported artefacts reappearing with it. Trading visible
 # ghosting for a metric improvement is a bad trade, so the blend is off by
 # default and the knob is left in case it is wanted.
-BURST = 12            # ring of recent displayed frames kept on disk, for diagnosis
+# The burst ring (burst_00..11.png) is a change-diagnostic: it keeps the
+# last N frames the *display* produced so a hung/stale picture can be
+# diffed offline (that is how the buffer-dangling blank and the FFC flap
+# were caught). NOT a product feature and it writes files at 5 Hz - so it
+# is OFF in the shipped viewer; builders re-enable with SEEKNANO_BURST=12.
+BURST = int(os.environ.get("SEEKNANO_BURST", "0") or 0)
 # The display window (lo/hi) is a slow exponential average rather than a
 # per-frame percentile. Per-frame is the classic AGC flicker: the mapping
 # rescales the whole image whenever the scene's warm/cold balance shifts by a
@@ -1804,6 +1809,15 @@ class Viewer(wx.Frame):
         except Exception:
             pass
         self.push_status("plug the Nano in, then press Start stream")
+        # burst files from previous sessions are diagnostic leftovers from a
+        # different run; the shipped viewer clears them once at startup
+        try:
+            for fn in os.listdir("."):
+                if fn.startswith("burst_") and fn.endswith(".png"):
+                    os.remove(fn)
+        except OSError:
+            pass
+
         self._load_flat()
 
         self.timer = wx.Timer(self)
