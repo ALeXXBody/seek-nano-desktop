@@ -29,15 +29,17 @@ the dev row.
    `SeekNano-driver.zip` once (Device Manager fallback in
    [app/README.md](app/README.md)).
 3. Plug the Nano in and run `SeekNano.exe`.
-4. Press **S** to stream. Point at a flat wall and press **F** for the best
-   picture — see [Getting a clean image](#getting-a-clean-image).
+4. Press **S** to stream. That's it — **no wall capture, no calibration step.**
+   The viewer estimates the sensor's per-pixel offsets shutterlessly from the
+   first few frames and keeps them corrected. See
+   [Getting a clean image](#getting-a-clean-image).
 
 ## Controls
 
 | Key | Action |
 |---|---|
 | **S** | Start / stop stream |
-| **F** | Capture flat-field reference (point at a uniform wall) |
+| **F** | Capture a flat-field reference — *optional*, see below |
 | **C** | Next colormap |
 | **P** | Save PNG snapshot |
 | **D** | Dump raw frame |
@@ -91,11 +93,23 @@ user-selectable rather than tuned to a fixed answer.
 
 ## Getting a clean image
 
-**Press F on a flat wall.** The sensor's per-pixel offsets drift as it warms, so
-an old reference actively hurts: measured here, a reference captured four hours
-earlier took the noise from 223 DL to 318 DL. References are now banked per gain,
-so the right one is restored at the gain that needs it. On a good capture the
-reference takes neighbour-difference noise from ~240 DL down to single digits.
+**Nothing to do — the correction is automatic.** The viewer builds a background
+from the first few frames at the locked gain and high-passes it, which removes
+the sensor's per-pixel offsets without needing a uniform surface to photograph.
+Measured on live frames this leaves **6.0 DL** of neighbour-difference noise
+against a **572 DL** scene span — about **1%**, with the scene intact. The phone
+app does the same thing and never asks you to find a wall, so neither does this.
+
+**F is optional.** It captures a reference on a uniform surface, banked per gain,
+which is slightly cleaner still. Skip it unless you want the last few percent.
+
+Two things worth knowing if you do press it. The offsets drift as the sensor
+warms, so an old reference actively *hurts* — one captured four hours earlier
+took noise from 223 DL to 318 DL. And a reference is only ever applied while it
+measurably reduces noise on live frames at the current gain; if it does not, the
+viewer says so and falls back to the automatic background rather than trusting
+it. (A stale reference used to *block* that fallback entirely, leaving the
+picture uncorrected for the whole session — hence the emphasis on "falls back".)
 
 Defective elements are found by their **flicker** rather than their offset,
 judged across the captured frames against a temporal median so the fixed pattern

@@ -1418,6 +1418,7 @@ class GlassButton(wx.Panel):
         self.accent = accent
         self.small = small
         self.icon = icon
+        self.glyph = icon           # may differ from `icon`: the start tile
         self._hover = False
         self._cb = on_click
         self._fit()
@@ -1454,6 +1455,11 @@ class GlassButton(wx.Panel):
         self.Refresh()
 
     # ---- API ------------------------------------------------------------
+    def SetGlyph(self, key):
+        """Swap the glyph on an icon button. No relayout - the tile is fixed."""
+        self.glyph = key
+        self.Refresh()
+
     def SetLabel(self, text):
         self.label = text
         if self.icon:
@@ -1510,21 +1516,38 @@ class GlassButton(wx.Panel):
             fill = (16, 22, 30) if not self._hover else (28, 39, 53)
             text = (222, 228, 235) if not self._hover else (140, 224, 246)
         if self.icon:
-            # rail form: a square tile with corner brackets and a glyph, no text
-            dc.SetPen(wx.Pen(wx.Colour(36, 48, 62)))
+            # rail form: a tile with a glyph and no text
+            #
+            # ONE outline, recoloured on hover. This used to draw a second
+            # rounded rect at (1, 1, w-3, h-3) radius 5 on top of the tile's
+            # own at (0, 0, w, h) radius 6. The two arcs sit at different
+            # radii, so on hover they interleaved into a jagged double corner -
+            # a staircase of pure cyan against the pure slate border, which is
+            # what read as "colours at the corners". Measured on the live
+            # window: 29 chroma-carrying pixels in the corner boxes on hover
+            # versus 10 idle, and the values were unmixed (56,222,246 next to
+            # 36,48,62), so it was geometry, not ClearType or antialiasing.
+            edge = wx.Colour(56, 222, 246) if self._hover \
+                else wx.Colour(36, 48, 62)
+            dc.SetPen(wx.Pen(edge))
             dc.SetBrush(wx.Brush(wx.Colour(*fill)))
+            # Full w x h, deliberately. Shrinking to w-1, h-1 to "stay inside"
+            # left the last row and column of the tile's paint buffer
+            # untouched, and the uninitialised memory that showed through was
+            # salmon - pure 255,107,53, the accent fill of the start tile,
+            # left over from an earlier frame. It surfaced as L-shaped corner
+            # brackets on the tiles whose buffers had held the orange tile.
+            # 47 px, identical across 6 consecutive samples, so not flicker.
             dc.DrawRoundedRectangle(0, 0, w, h, 6)
-            if self._hover:
-                dc.SetPen(wx.Pen(wx.Colour(56, 222, 246)))
-                dc.SetBrush(wx.TRANSPARENT_BRUSH)
-                dc.DrawRoundedRectangle(1, 1, w - 3, h - 3, 5)
-            g = self.icon
-            if self.accent:
-                g = "stop" if g == "play" else g
-            # The glyph spans the tile minus a small pad. Sizing it off
-            # min(w, h) - 18 left only ~22 px inside a 40 px tile, which
-            # clipped the colormap bars and the crosshair.
-            _icon_glyph(dc, g, w // 2, h // 2,
+            # `glyph`, not `icon`: the start tile shows play while stopped and
+            # stop while running. Deriving it from `accent` instead - which is
+            # what the first pass did - pinned it to stop permanently, because
+            # the start tile is the only accent button and so was always
+            # showing the opposite of its own state.
+            # The glyph spans 55% of the tile: sizing it off min(w, h) - 18
+            # left only ~22 px inside a 40 px tile, which clipped the colormap
+            # bars and the crosshair.
+            _icon_glyph(dc, self.glyph, w // 2, h // 2,
                         int(min(w, h) * 0.55), text)
             return
         dc.SetPen(wx.Pen(wx.Colour(30, 42, 54)))
@@ -2092,6 +2115,7 @@ class Viewer(wx.Frame):
         if self.stream_thread and self.stream_thread.is_alive():
             self.stream_thread.stop_flag.set()
             self.stream_thread = None
+            self.start_btn.SetGlyph("play")
             self.start_btn.SetLabel("Start stream")
             self.push_status("stopped")
             return
@@ -2104,6 +2128,7 @@ class Viewer(wx.Frame):
                 self.q.put(("log", "replay failed: %r" % e))
                 return
             self.q.put(("log", "replay starting..."))
+            self.start_btn.SetGlyph("stop")
             self.start_btn.SetLabel("Stop stream")
             self.stream_thread = thread
             self.stream_thread.start()
@@ -2158,6 +2183,7 @@ class Viewer(wx.Frame):
             self.stream_thread = Stream(self.q, upload_target=upload_target,
                                         upload_port=upload_port)
         self.stream_thread.start()
+        self.start_btn.SetGlyph("stop")
         self.start_btn.SetLabel("Stop stream")
 
     def on_cmap(self, ev):
@@ -2336,6 +2362,7 @@ class Viewer(wx.Frame):
         if self.stream_thread and self.stream_thread.is_alive():
             self.stream_thread.stop_flag.set()
             self.stream_thread = None
+        self.start_btn.SetGlyph("play")
         self.start_btn.SetLabel("Start stream")
         self.push_status("dev: stopped, will auto-probe endpoints on Start")
         self.q.put(("log", "dev: restart the stream to re-probe endpoints"))
@@ -3135,15 +3162,24 @@ class Viewer(wx.Frame):
         and black frames were. The high-pass form still removes 90% of the noise
         and keeps 89% of the scene.
         """
-        if self.ffc is not None:
+        if self.ffc is not None and self.ffc_ok:
             # Only apply the reference while it demonstrably reduces noise on
             # live data, at the current gain. See _validate_ffc: a stale
             # reference measurably ADDS noise.
-            if self.ffc_ok:
-                img = _apply_ffc(img, self.ffc)
+            img = _apply_ffc(img, self.ffc)
         elif self.bg_hp is not None:
             # The running background is built from frames at the locked gain, so
             # it is gain-correct by construction and stays valid.
+            #
+            # This used to be `elif self.ffc is not None:` guarding the whole
+            # pair, so a flat that was LOADED but REJECTED by _validate_ffc
+            # skipped the fallback entirely and left the picture uncorrected
+            # for the rest of the session. ffc_latest.raw is on disk from an
+            # earlier session, so this was the normal path, not an edge case:
+            # the log read "flat reference REJECTED at gain 3: it would raise
+            # noise 244.1 -> 230.0 DL" and then never corrected anything, and
+            # the auto-stretch painted the raw pattern over the full colormap
+            # as static. A rejected reference must fall back, not veto.
             img = img - self.bg_hp
         # Defective elements are corrected independently of the flat-field
         # reference. The reference fixes the broad per-pixel offsets; a handful
@@ -3499,7 +3535,8 @@ class Viewer(wx.Frame):
                         self.flat_btn.Disable()
                         self.q.put(("log", "flat for gain %d restored from the "
                                            "bank" % hdr[2]))
-                if self.ffc is None and len(self.bg_frames) < BG_FRAMES:
+                if not (self.ffc is not None and self.ffc_ok) \
+                        and len(self.bg_frames) < BG_FRAMES:
                     # The bank is fed ONLY from frames that already passed the
                     # gain lock, so it can never contain a startup transient.
                     # Filling it before the lock is what broke the picture: it
@@ -3508,10 +3545,15 @@ class Viewer(wx.Frame):
                     # gain-3 frames on screen. Because the bank fills one frame
                     # per tick, the correction also changed continuously - the
                     # flicker.
+                    #
+                    # The guard is "no reference is being APPLIED", not "a
+                    # reference object exists". It used to be `ffc is None`,
+                    # which meant a loaded-but-rejected flat both blocked the
+                    # subtraction in _process AND starved this bank of frames,
+                    # so there was no fallback to fall back to.
                     self.bg_frames.append(_roi_u16(payload))
                     self.bg_gains.append(hdr[2])
-                if self.ffc is None and len(self.bg_frames) >= BG_FRAMES \
-                        and self.bg_hp is None:
+                if len(self.bg_frames) >= BG_FRAMES and self.bg_hp is None:
                     b = np.stack(self.bg_frames).mean(axis=0)
                     self.bg_hp = b - _boxblur(b, 9)   # precomputed once
                 if self.frame_raw is not None and not _frame_has_content(payload):
@@ -3541,19 +3583,23 @@ class Viewer(wx.Frame):
                     self.log.AppendText(
                         "streaming: first frame accepted (gain %d, seq %d)\n"
                         % (hdr[2], hdr[1]))
-                if self.ffc is None and self.shown_frames % 15 == 0:
-                    # Keep saying it, because the mottling will not go away on
-                    # its own. Measured on live frames the high-frequency
-                    # structure correlates +0.9992 between frames - matching the
-                    # "identical FPN" synthetic anchor (+0.9995) and nothing like
-                    # the "different FPN" case (+0.0019). So the blotches ARE
-                    # fixed-pattern noise, and they extend past 25 px, where
-                    # they cannot be separated from the scene without a
-                    # reference captured on a uniform surface. Until that
-                    # exists the honest state is "pattern still present".
+                if not (self.ffc is not None and self.ffc_ok) \
+                        and self.shown_frames == 1:
+                    # Say it ONCE, on the first frame, and only when no
+                    # correction is actually being applied.
+                    #
+                    # This used to repeat every 15 frames for the whole session,
+                    # telling the user to point at a wall. It was wrong on both
+                    # counts. The phone app never asks for that, and the
+                    # shutterless background measures well enough that asking is
+                    # noise: 6.0 DL residual against a 572 DL scene span, 1.05%,
+                    # with the scene preserved. And the honest trigger is "no
+                    # correction applied", not "ffc is None" - with a stale
+                    # ffc_latest.raw on disk the old test was false whenever it
+                    # mattered.
                     self.push_status(
-                        "no wall reference yet - press F / 'Capture flat "
-                        "(wall)' to remove the pattern")
+                        "streaming - shutterless correction active. "
+                        "F on a uniform wall refines it further")
                 if self.shown_frames % 50 == 0:
                     # ALSO to the file. Panel-only meant that when frames
                     # stopped being accepted, the counts that explain why
@@ -3622,7 +3668,13 @@ class Viewer(wx.Frame):
                               % (n, USB_RETRY_MAX,
                                  USB_RETRY_DELAY_MS / 1000.0))
                         self.stream_thread = None
+                        self.start_btn.SetGlyph("clear")
                         self.start_btn.SetLabel("Reconnecting...")
+                        # The static "start / stop (S)" tooltip would contradict
+                        # an X glyph that is not clickable while the reconnect
+                        # timer owns the camera.
+                        self.start_btn.SetToolTip(
+                            "reconnecting - waiting for the Nano")
                         wx.CallLater(int(USB_RETRY_DELAY_MS),
                                      self._usb_reconnect)
                         return
@@ -3632,7 +3684,9 @@ class Viewer(wx.Frame):
                 self._usb_retries = 0
                 self.push_status("ERROR: " + payload[:80])
                 self.stream_thread = None
+                self.start_btn.SetGlyph("play")
                 self.start_btn.SetLabel("Start stream")
+                self.start_btn.SetToolTip("start / stop  (S)")
             elif kind == "log":
                 self.log.AppendText("%s\n" % payload)
                 if self.log.GetLastPosition() > 4000:
