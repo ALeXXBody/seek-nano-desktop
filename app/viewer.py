@@ -2573,6 +2573,23 @@ class Viewer(wx.Frame):
                 pass
         # Rate-limited: only the first fault every 5 s is kept, so a persistent
         # fault cannot fill the disk.
+        if zmax > SCAN_FAULT_Z:
+            # REJECT the frame. Measured from the first captured fault: the
+            # offending rows carried ~35,000 DL while rows 0-237 carried
+            # ~6,500 - a ratio of 5.49, which is the AGC changing gain partway
+            # down the frame. The bytes are valid and the header passes every
+            # check, so nothing upstream can catch it, and the result on screen
+            # is a full-width band of nonsense colour.
+            #
+            # Signalled to _process, which returns None, so _bmp falls through
+            # to its cached bitmap and the previous good picture stays up. The
+            # frame is dropped rather than repaired: the gain the bottom rows
+            # were captured at is not known, so any correction would be a
+            # guess.
+            self._scan_fault = True
+            self._scan_rejected = getattr(self, "_scan_rejected", 0) + 1
+        else:
+            self._scan_fault = False
         if zmax > SCAN_FAULT_Z and time.time() - getattr(
                 self, "_scan_last_save", 0.0) > 5.0:
             self._scan_last_save = time.time()
@@ -2997,6 +3014,10 @@ class Viewer(wx.Frame):
         # scene, which is the only honest reading without absolute calibration.
         self._detect_spots(img)
         self._scanline_health(img)
+        if getattr(self, "_scan_fault", False):
+            # A mid-frame gain change. The previous good picture stays on screen
+            # via the _bmp cache rather than showing the empty state.
+            return None
         p1 = np.pad(img, 1, mode="edge")
         stack = np.stack([p1[dy:dy + IMG_H, dx:dx + IMG_W]
                           for dy in range(3) for dx in range(3)])

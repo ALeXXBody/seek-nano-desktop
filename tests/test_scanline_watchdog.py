@@ -165,6 +165,41 @@ for f in os.listdir("."):
     if f.startswith("scanline_fault_"):
         os.remove(f)
 
+print("\n4. a faulted frame is REJECTED, not displayed")
+# Measured from the first captured fault: the offending rows carried ~35,000 DL
+# while rows 0-237 carried ~6,500, a ratio of 5.49. That is the AGC changing
+# gain partway down the frame - the bytes are valid and every header check
+# passes, so nothing upstream can catch it.
+gain_jump = None
+for cand in sorted(pathlib.Path("C:/a").glob("scanline_fault_*.raw")):
+    import struct
+    b = cand.read_bytes()
+    if len(b) < 12:
+        continue
+    npx = struct.unpack("<I", b[8:12])[0]
+    if npx != IH * IW:
+        continue
+    gain_jump = np.frombuffer(b[12:12 + npx * 4], dtype=np.float32).reshape(
+        IH, IW)
+    break
+if gain_jump is None:
+    print("   (skipped - no captured fault frame on disk to replay)")
+    p = None
+else:
+    p = P()
+    p.frame_raw = np.zeros(IH * IW * 2, np.uint8).tobytes()
+    p._scanline_health(gain_jump)
+    check(getattr(p, "_scan_fault", False) is True,
+          "the REAL captured fault frame is flagged for rejection")
+    p._scanline_health(clean)
+    check(getattr(p, "_scan_fault", False) is False,
+    "a clean frame clears the flag, so rejection does not latch")
+    check(getattr(p, "_scan_rejected", 0) == 1,
+          "and exactly one frame was counted as rejected")
+for f in os.listdir("."):
+    if f.startswith("scanline_fault_"):
+        os.remove(f)
+
 print()
 if FAIL:
     print("FAILED %d check(s):" % len(FAIL))
