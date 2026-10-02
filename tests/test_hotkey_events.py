@@ -136,9 +136,19 @@ ns["_hotkey_run"](panel, KeyEvent(FakeWx.WXK_SPACE), "key")
 check(panel.paused, "space toggles pause")
 
 print("\n3. paint must not clear before it knows it has something to draw")
-paint = next(n for n in ast.walk(tree)
+# Pick Viewer.on_paint specifically. Taking the first on_paint in the file
+# matched GlassButton's once the custom title bar, telemetry block and glass
+# buttons were added - all four classes define on_paint, and Viewer is last.
+# The test then inspected a button's paint handler, found no _bmp() in it, and
+# reported six failures against code that was correct.
+paint = next(n for n in next(c for c in tree.body
+                             if isinstance(c, ast.ClassDef)
+                             and c.name == "Viewer").body
              if isinstance(n, ast.FunctionDef) and n.name == "on_paint")
 src = ast.get_source_segment(TEXT, paint) or ""
+check("_bmp()" in src,
+      "found Viewer.on_paint (L%s), the one that draws the frame"
+      % paint.lineno)
 build_at = src.find("self._bmp()")
 clear_at = src.find("dc.Clear()")
 check(build_at > 0 and clear_at > 0, "on_paint builds a bitmap and clears")
