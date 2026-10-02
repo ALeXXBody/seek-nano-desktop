@@ -1253,7 +1253,8 @@ class TitleBar(wx.Panel):
     """
 
     def __init__(self, parent, theme):
-        wx.Panel.__init__(self, parent, style=wx.BG_STYLE_PAINT)
+        wx.Panel.__init__(self, parent)
+        self.SetBackgroundStyle(wx.BG_STYLE_PAINT)   # required AFTER init
         self.t = theme
         self.led_text = "no device"
         self.led_col = self.t["muted"]
@@ -1403,6 +1404,85 @@ class TitleBar(wx.Panel):
     def __init_hooks(self):
         pass
 
+class TelemetryBlock(wx.Panel):
+    """Rail readout: status headline + mono stats + an ironbow identity bar.
+
+    The gradient strip across the bottom is the camera's own ramp - the one
+    identity colour that is obviously *this* instrument, not a generic accent.
+    """
+
+    def __init__(self, parent, theme):
+        wx.Panel.__init__(self, parent, style=wx.BG_STYLE_PAINT)
+        self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
+        self.t = theme
+        self.headline = "no device"
+        self.head_col = theme["muted"]
+        self.fps = ""
+        self.gain = ""
+        self.seq = ""
+        self.Bind(wx.EVT_PAINT, self.on_paint)
+
+    def set(self, headline=None, col=None, fps=None, gain=None, seq=None):
+        if headline is not None:
+            self.headline = headline
+        if col is not None:
+            self.head_col = col
+        if fps is not None:
+            self.fps = fps
+        if gain is not None:
+            self.gain = gain
+        if seq is not None:
+            self.seq = seq
+        self.Refresh()
+
+    def on_paint(self, ev):
+        w, h = self.GetClientSize()
+        dc = wx.AutoBufferedPaintDC(self)
+        dc.SetBackground(wx.Brush(wx.Colour(*self.t["panel"])))
+        dc.Clear()
+        # headline, uppercase, letterspaced by drawing one char at a time
+        f = _ui_font(15, bold=True)
+        if f is not None:
+            dc.SetFont(f)
+        dc.SetTextForeground(wx.Colour(*self.head_col))
+        text = self.headline.upper()
+        # shrink to what the rail width can hold; break with an ellipsis
+        fits = max(10, int(w - 32) // (6 * 2))
+        if len(text) > fits:
+            text = text[:fits - 1] + "\u2026"
+        cx = 16
+        fsp = 1.5
+        for ch in text[:34]:
+            dc.DrawText(ch, int(cx), 12)
+            cw = dc.GetTextExtent(ch)[0]
+            cx += cw + fsp
+        # mono readouts
+        f2 = _ui_font(9, mono=True)
+        if f2 is not None:
+            dc.SetFont(f2)
+        dc.SetTextForeground(wx.Colour(*self.t["muted"]))
+        comp = []
+        if self.fps:
+            comp.append(self.fps.upper())
+        if self.gain:
+            comp.append("GAIN %s" % self.gain)
+        if self.seq:
+            comp.append("SEQ %s" % self.seq)
+        line = "   ".join(comp) if comp else ""
+        if line:
+            dc.DrawText(line, 16, 52)
+        # the ironbow identity bar across the bottom
+        bar_w = max(1, w - 32)
+        for i in range(bar_w):
+            t = i / (bar_w - 1)
+            r, g, b = ironbow(t)
+            dc.SetPen(wx.Pen(wx.Colour(
+                max(0, min(255, int(r * 255))),
+                max(0, min(255, int(g * 255))),
+                max(0, min(255, int(b * 255))))))
+            dc.DrawLine(16 + i, h - 8, 16 + i, h - 4)
+
+
 class Viewer(wx.Frame):
     def __init__(self):
         # no wx.CAPTION: the painted TitleBar is the frame; taskbar + resize kept
@@ -1450,6 +1530,10 @@ class Viewer(wx.Frame):
         self.hi_ema = None
         self.prev_t = None        # previous displayed frame, for the blend
         self.stretch_skips = 0    # frames whose stretch window was rejected
+        # median window buffers, available before Start: a frame shown without
+        # clicking Start must not crash the paint with a missing attribute
+        self._plo = deque(maxlen=WINDOW_MEDIAN)
+        self._phi = deque(maxlen=WINDOW_MEDIAN)
 
         # ---- window chrome: frameless HUD shell ---------------------------
         self.SetBackgroundColour(wx.Colour(*THEME["bg"]))
@@ -1463,108 +1547,105 @@ class Viewer(wx.Frame):
         self.header = TitleBar(panel, THEME)
         self.header.SetMinSize((-1, 46))
 
-        # ---- command deck ---------------------------------------------------
-        self.start_btn = GlassButton(panel, label="Start stream",
+        # primary action, moved into the rail below
+        self.start_btn = GlassButton(self, label="Start stream",
                                      accent=True, on_click=self.on_toggle,
                                      tooltip="start / stop (key: s)")
-        self.cmap_btn = GlassButton(panel, label="colormap: ironbow",
-                                    on_click=self.on_cmap,
-                                    tooltip="cycle colormap (key: c)")
-        self.flat_btn = GlassButton(panel, label="Capture flat (wall)",
-                                    on_click=self.on_capture_flat,
-                                    tooltip="capture a wall reference (key: f)")
-        flat_clear = GlassButton(panel, label="Clear flat",
-                                 on_click=self.on_clear_flat)
-        snap_btn = GlassButton(panel, label="Save PNG",
-                               on_click=self.on_snapshot, tooltip="key: p")
-        raw_btn = GlassButton(panel, label="Dump raw",
-                              on_click=self.on_raw, tooltip="key: d")
 
-        top = wx.BoxSizer(wx.HORIZONTAL)
-        top.Add(self.start_btn, 0, wx.LEFT|wx.RIGHT, 10)
-        top.Add(self.cmap_btn, 0, wx.LEFT, 14)
-        top.Add(self.flat_btn, 0, wx.LEFT, 8)
-        top.Add(flat_clear, 0, wx.LEFT, 8)
-        top.Add(snap_btn, 0, wx.LEFT, 8)
-        top.Add(raw_btn, 0, wx.LEFT, 8)
-        top.Add((20, 1), 1, wx.EXPAND)
-
-        # ---- hot-spot row ----------------------------------------------------
-        self.spot_btn = GlassButton(panel, label="hot spots: off",
-                                    small=True, on_click=self.on_spot_mode)
-        self.spot_sens_btn = GlassButton(panel, label="sens 1.00",
-                                         small=True, on_click=self.on_spot_sens)
-        hot = wx.BoxSizer(wx.HORIZONTAL)
-        hot.Add((10, 1), 0)
-        hot.Add(self.spot_btn, 0, wx.LEFT, 0)
-        hot.Add(self.spot_sens_btn, 0, wx.LEFT, 8)
-        hot.Add((20, 1), 1, wx.EXPAND)
-        self.hot_sizer = hot
-
-        # ---- DEV row: built but HIDDEN. Ctrl+Alt+D reveals it --------------
-        self.dev_host = wx.TextCtrl(panel, value="192.168.50.200:8100",
-                                    style=wx.TE_PROCESS_ENTER)
-        self.dev_upload = wx.CheckBox(panel, label="dev: upload frames")
-        self.dev_probe = GlassButton(panel, label="dev: retry endpoints",
-                                     small=True, on_click=self.on_dev_probe)
-        self.dev_bind = GlassButton(panel, label="dev: bind info",
-                                    small=True, on_click=self.on_dev_bind)
-        self.dev_upload.SetValue(False)
-        self.dev_host.SetBackgroundColour(wx.Colour(*THEME["panel"]))
-        self.dev_host.SetForegroundColour(wx.Colour(*THEME["accent2"]))
-        self.dev_upload.SetBackgroundColour(wx.Colour(*THEME["bg"]))
-        self.dev_upload.SetForegroundColour(wx.Colour(*THEME["muted"]))
-        devbox = wx.BoxSizer(wx.HORIZONTAL)
-        devbox.Add((10, 1), 0)
-        devbox.Add(self.dev_host, 1, wx.ALIGN_CENTER_VERTICAL)
-        devbox.Add(self.dev_upload, 0, wx.LEFT, 8)
-        devbox.Add(self.dev_probe, 0, wx.LEFT, 8)
-        devbox.Add(self.dev_bind, 0, wx.LEFT, 8)
-        devbox.Add((20, 1), 1, wx.EXPAND)
-        self.dev_sizer = devbox
-        split = wx.SplitterWindow(panel, style=wx.SP_LIVE_UPDATE)
-        self.video = wx.Panel(split, style=wx.BORDER_SUNKEN)
         # Tell wx "I paint every pixel of this myself". Without it, wxWindows
         # honours WM_ERASEBKGND and erases the panel to its background brush
         # before handing us the paint - and that background is black. So every
         # repaint had a window in which the panel was solid black, which is
-        # exactly the flicker: measured from the real screen the video panel
-        # dropped to mean 0.47/255 with image-std 8.1 while the log panel beside
-        # it stayed perfectly steady (p-p 0.00).
-        #
-        # This was never bad data and never a failed draw. Over 713 paints the
-        # array passed to DrawBitmap had rgb std 69-78 and was never flat,
-        # seeknano_crash.log stayed empty, and only one blank paint was ever
-        # recorded (at startup). The buffer the app hands to the screen is
-        # correct; the erase underneath it was not.
+        # exactly the flicker. (Details of that hunt are history; the setting
+        # below keeps the panel from being erased underneath the paint.)
+        self.video = wx.Panel(panel, style=wx.BG_STYLE_PAINT)
         self.video.SetBackgroundStyle(wx.BG_STYLE_PAINT)
         self.video.SetBackgroundColour(wx.BLACK)
         self.video.Bind(wx.EVT_PAINT, self.on_paint)
-        self.log = wx.TextCtrl(split, style=wx.TE_MULTILINE | wx.TE_READONLY |
+
+        # ---- right rail: telemetry / command deck / (hidden diagnostics) ---
+        rail = wx.Panel(panel, style=wx.BG_STYLE_PAINT)
+        rail.SetBackgroundStyle(wx.BG_STYLE_PAINT)
+        rail.SetBackgroundColour(wx.Colour(*THEME["bg"]))
+        self.rail = rail
+        rail.Bind(wx.EVT_PAINT, self.on_rail_paint)
+
+        self.telemetry = TelemetryBlock(rail, THEME)
+        self.telemetry.SetMinSize((-1, 108))
+
+        deck = wx.BoxSizer(wx.VERTICAL)
+        deck.Add((1, 6), 0)
+        self.start_btn.Reparent(rail)
+        deck.Add(self.start_btn, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 14)
+        deck.Add((1, 10), 0)
+        self.cmap_btn = GlassButton(rail, label="colormap: ironbow",
+                                    on_click=self.on_cmap, tooltip="key: c")
+        self.flat_btn = GlassButton(rail, label="Capture flat (wall)",
+                                    on_click=self.on_capture_flat, tooltip="key: f")
+        flat_clear = GlassButton(rail, label="Clear flat",
+                                 on_click=self.on_clear_flat)
+        snap_btn = GlassButton(rail, label="Save PNG", on_click=self.on_snapshot,
+                               tooltip="key: p")
+        raw_btn = GlassButton(rail, label="Dump raw", on_click=self.on_raw,
+                              tooltip="key: d")
+        for b in (self.cmap_btn, self.flat_btn, flat_clear, snap_btn, raw_btn):
+            deck.Add(b, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 14)
+            deck.Add((1, 8), 0)
+        # hotspot row lives in the rail too
+        self.spot_btn = GlassButton(rail, label="hot spots: off", small=True,
+                                    on_click=self.on_spot_mode)
+        self.spot_sens_btn = GlassButton(rail, label="sens 1.00", small=True,
+                                         on_click=self.on_spot_sens)
+        hotrow = wx.BoxSizer(wx.HORIZONTAL)
+        hotrow.Add(self.spot_btn, 1, wx.EXPAND|wx.LEFT, 14)
+        hotrow.Add(self.spot_sens_btn, 1, wx.EXPAND|wx.LEFT, 8)
+        deck.Add(hotrow, 0, wx.EXPAND|wx.RIGHT, 14)
+        deck.Add((1, 10), 1, wx.EXPAND)           # spring
+
+        # diagnostics field: hidden by default (Ctrl+L shows it inside the rail)
+        self.log = wx.TextCtrl(rail, style=wx.TE_MULTILINE | wx.TE_READONLY |
                                wx.TE_DONTWRAP)
         self.log.SetBackgroundColour(wx.Colour(*THEME["panel"]))
         self.log.SetForegroundColour(wx.Colour(*THEME["muted"]))
-        self.log.SetFont(wx.Font(9, wx.FONTFAMILY_TELETYPE,
-                                 wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
+        self.log.SetFont(_ui_font(9, mono=True))
+        deck.Add(self.log, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 14)
+        self.log.Hide()
+        # dev upload row - built, wired, hidden (Ctrl+Alt+D)
+        self.dev_host = wx.TextCtrl(rail, value="192.168.50.200:8100",
+                                    style=wx.TE_PROCESS_ENTER)
+        self.dev_upload = wx.CheckBox(rail, label="dev: upload frames")
+        self.dev_upload.SetValue(False)
+        self.dev_probe = GlassButton(rail, label="dev: retry endpoints",
+                                     small=True, on_click=self.on_dev_probe)
+        self.dev_bind = GlassButton(rail, label="dev: bind info",
+                                    small=True, on_click=self.on_dev_bind)
+        self.dev_host.SetForegroundColour(wx.Colour(*THEME["accent2"]))
+        self.dev_upload.SetBackgroundColour(wx.Colour(*THEME["bg"]))
+        self.dev_upload.SetForegroundColour(wx.Colour(*THEME["muted"]))
+        devbox = wx.BoxSizer(wx.VERTICAL)
+        devbox.Add((1, 6), 0)
+        for b in (self.dev_host, self.dev_probe, self.dev_bind, self.dev_upload):
+            devbox.Add(b, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 14)
+            devbox.Add((1, 6), 0)
+        deck.Add(devbox, 0, wx.EXPAND)
+        devbox.ShowItems(False)                   # shipped app: invisible
+        self.dev_sizer = devbox
+
+        railbox = wx.BoxSizer(wx.VERTICAL)
+        railbox.Add(self.telemetry, 0, wx.EXPAND)
+        railbox.Add(deck, 1, wx.EXPAND)
+        rail.SetSizer(railbox)
+
+        # video canvas: dominant, framed with its own inset margin
+        main = wx.BoxSizer(wx.HORIZONTAL)
+        main.Add(self.video, 1, wx.EXPAND|wx.ALL, 12)
+        main.Add(rail, 0, wx.EXPAND)
+        main.Add((2, 1), 0)
+
         sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(self.header, 0, wx.EXPAND, 46)
-        sizer.Add(top, 0, wx.EXPAND)
-        # The hot-spot row has to be added to the sizer that is actually
-        # attached to the panel. Built but never added, both buttons sat at the
-        # panel's default top-left position, on top of "Start stream" - found by
-        # enumerating child window rects, not by any test, because a control that
-        # is never laid out still reports a plausible size.
-        sizer.Add(hot, 0, wx.EXPAND)
-        sizer.Add(devbox, 0, wx.EXPAND)
-        # dev row is built but invisible in the shipped viewer; Ctrl+Alt+D
-        devbox.ShowItems(False)
-        sizer.Add(split, 1, wx.EXPAND)
+        sizer.Add(self.header, 0, wx.EXPAND)
+        sizer.Add(main, 1, wx.EXPAND)
         panel.SetSizer(sizer)
-        split.SplitVertically(self.video, self.log, 420)
-        split.SetSashPosition(420)
-        # the diagnostics field is hidden in the stable build; Ctrl+L shows it
-        split.Unsplit(self.log)
-        self.split = split
 
         # no status bar - the HUD title bar carries the state text
 
@@ -1661,6 +1742,9 @@ class Viewer(wx.Frame):
             colour, label = THEME["accent2"], text
         info = getattr(self._info, "strip", lambda: "")() if self._info else ""
         self.header.set_state(label, colour, info=info[:60])
+        # rail telemetry block carries the same headline
+        if getattr(self, "telemetry", None) is not None:
+            self.telemetry.set(headline=label, col=colour)
 
     # ---- stream control ----
     def on_toggle(self, ev):
@@ -1679,7 +1763,14 @@ class Viewer(wx.Frame):
         self.lo_ema = None        # latched display window; see _bmp
         self.hi_ema = None
         self.prev_t = None
+        # median buffers for the contrast window: one bad frame cannot move a
+        # median. Initialised here too (on_toggle re-creates them) so a frame
+        # shown before Start cannot crash the paint.
+        self._plo = deque(maxlen=WINDOW_MEDIAN)
+        self._phi = deque(maxlen=WINDOW_MEDIAN)
         self.stretch_skips = 0
+        self.paint_count = 0
+        self._paint_seq = None
         self.paint_count = 0    # paints actually delivered to the screen
         self._paint_seq = None # frame seq the screen is displaying
         # median buffers for the contrast window: one bad frame cannot move a
@@ -1972,6 +2063,34 @@ class Viewer(wx.Frame):
                              getattr(self, "bad_frames", 0)))
                 except Exception:
                     pass
+            # designed empty state: faint HUD frame + NO SIGNAL, not a void
+            dc = wx.AutoBufferedPaintDC(self.video)
+            cw, ch = self.video.GetClientSize()
+            # explicit fill (SetBackground/Clear proved unreliable on wxGTK)
+            dc.SetPen(wx.TRANSPARENT_PEN)
+            dc.SetBrush(wx.Brush(wx.Colour(7, 10, 14)))
+            dc.DrawRectangle(0, 0, cw, ch)
+            dc.SetPen(wx.Pen(wx.Colour(34, 44, 56)))
+            dc.DrawRoundedRectangle(1, 1, cw - 2, ch - 2, 10)
+            # 1-in-8 scanline grid texture, very faint
+            dc.SetPen(wx.Pen(wx.Colour(14, 19, 25)))
+            y = 8
+            while y < ch - 8:
+                dc.DrawLine(8, y, cw - 8, y)
+                y += 28
+            f = _ui_font(14, bold=True)
+            if f is not None:
+                dc.SetFont(f)
+            dc.SetTextForeground(wx.Colour(64, 76, 90))
+            label = "NO SIGNAL"
+            lw, lh = dc.GetTextExtent(label)
+            dc.DrawText(label, (cw - lw) // 2, (ch - lh) // 2 - 12)
+            f2 = _ui_font(9)
+            if f2 is not None:
+                dc.SetFont(f2)
+            sub = "plug the Nano in, then press Start stream"
+            sw, sh = dc.GetTextExtent(sub)
+            dc.DrawText(sub, (cw - sw) // 2, (ch - sh) // 2 + 18)
             return
         # The ENTIRE draw is inside its own try. It used to stop wrapping at
         # _bmp(), so a throw from wx.Image/Scale/Bitmap/DrawBitmap - the exact
@@ -2000,6 +2119,10 @@ class Viewer(wx.Frame):
             # HUD frame overlay: hairline inset + corner ticks, drawn only
             # when a real frame is on screen (never over the blank startup)
             cw, ch = self.video.GetClientSize()
+            # pen only: DrawRectangle fills with the DC brush (white on
+            # wxGTK) unless the fill is transparent - that white vinyl
+            # covering the thermal frame is exactly what the user saw
+            dc.SetBrush(wx.TRANSPARENT_BRUSH)
             dc.SetPen(wx.Pen(wx.Colour(46, 62, 78)))
             dc.DrawRectangle(0, 0, cw, ch)
             oc = wx.Colour(*THEME["accent"])
@@ -2153,6 +2276,11 @@ class Viewer(wx.Frame):
         Diagnosing this from a description of what the screen looks like has
         been the slowest part of the whole exercise.
         """
+        # diagnostic stamp is OFF in the shipped viewer: it was baking the
+        # whole session log into every picture. Toggle with "o" when
+        # diagnosing; snapshots then ship as clean thermal images.
+        if not getattr(self, "stamp", False):
+            return t
         t = t.copy()
         # ffc state is shown as three distinct words, not a yes/no, because
         # "a reference exists" and "the reference is being applied" are
@@ -2626,6 +2754,9 @@ class Viewer(wx.Frame):
                 self.last_fid = hdr[1]
                 self.bad_frames = 0
                 self.last_gain = hdr[2]
+                if getattr(self, "telemetry", None) is not None:
+                    self.telemetry.set(fps=(self._info or ""),
+                                       gain=str(hdr[2]), seq=str(hdr[1]))
                 if self.shown_gain is not None and hdr[2] != self.shown_gain:
                     # The AGC never settles on this hardware. Measured over 20
                     # consecutive kicks the gain word walked
@@ -2744,6 +2875,15 @@ class Viewer(wx.Frame):
         if self.frame_raw and not self.paused:
             self.video.Refresh()
 
+    def on_rail_paint(self, ev):
+        """Rail field: deep bg + 1px hairline separating it from the canvas."""
+        w, h = self.rail.GetClientSize()
+        dc = wx.AutoBufferedPaintDC(self.rail)
+        dc.SetBackground(wx.Brush(wx.Colour(*THEME["bg"])))
+        dc.Clear()
+        dc.SetPen(wx.Pen(wx.Colour(*THEME["line"])))
+        dc.DrawLine(0, 0, 0, h)
+
     def on_close(self, ev):
         if self.stream_thread:
             self.stream_thread.stop_flag.set()
@@ -2836,14 +2976,15 @@ class Viewer(wx.Frame):
             return
         if ctrl and c == "l":
             self._log_shown = not getattr(self, "_log_shown", False)
+            self.log.Show(self._log_shown)
             if self._log_shown:
-                self.split.SplitVertically(self.video, self.log, 420)
-                self.split.SetSashPosition(420)
+                self.log.SetMinSize((-1, 170))
             else:
-                self.split.Unsplit(self.log)
+                self.log.SetMinSize((-1, 0))
+            self.rail.Layout()
             ev.Skip()
             return
-        if c in "scpdf " or k in (wx.WXK_ESCAPE, wx.WXK_SPACE):
+        if c in "scpodf " or k in (wx.WXK_ESCAPE, wx.WXK_SPACE):
             if c == "s":
                 self.on_toggle(None)
             elif c == "c":
@@ -2854,6 +2995,11 @@ class Viewer(wx.Frame):
                 self.on_raw(None)
             elif c == "f":
                 self.on_capture_flat(None)
+            elif c == "o":
+                # diagnostic stamp: session state burned into the picture
+                self.stamp = not getattr(self, "stamp", False)
+                self.push_status("diagnostic stamp " +
+                                 ("on" if self.stamp else "off"))
             elif c == "q" or k == wx.WXK_ESCAPE:
                 self.Close()
             elif c == " ":

@@ -295,7 +295,8 @@ class TestHiddenDevSurfaces(unittest.TestCase):
     def test_dev_row_hidden_at_startup(self):
         src = self._src()
         self.assertIn("self.dev_sizer = devbox", src)
-        self.assertIn("split.Unsplit(self.log)", src)  # log hidden, not the row
+        self.assertIn("devbox.ShowItems(False)", src)   # dev row: built, hidden
+        self.assertIn("self.log.Hide()", src)           # log: hidden (Ctrl+L)
 
     def test_dev_row_toggle_hook(self):
         src = self._src()

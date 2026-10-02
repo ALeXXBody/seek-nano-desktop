@@ -12,6 +12,7 @@ def make_frame_body(seq=1):
     raw = bytearray(177_840)
     raw[0:2] = b"\x79\x05"
     struct.pack_into("<H", raw, 2, seq)
+    struct.pack_into("<H", raw, 4, 3)     # gain word (0 is rejected live)
     vals = np.zeros(342 * 260, dtype=np.uint16)
     yy, xx = np.mgrid[0:260, 0:342]
     prof = np.clip(0x4000 + 2000.0 * (yy / 259.0) + np.sin(np.arange(342) / 12.0) * 600,
