@@ -1,36 +1,22 @@
 # Seek Nano Desktop Viewer
 
-A desktop viewer for the **Seek Nano** thermal camera (USB `289D:0011`). The camera
-ships with a phone-only Android/iOS app and Seek does not publish a desktop SDK, so
-this project reverse-engineered the USB protocol from the app's bundled native
-libraries and reimplemented it. It now streams a stable 320×240 thermal image at
-**25 fps** on Windows.
+A desktop viewer and analysis station for the **Seek Nano** thermal camera
+(USB `289D:0011`). The camera ships with a phone-only Android/iOS app and Seek
+publishes no desktop SDK, so this project reverse-engineered the USB protocol
+from the app's bundled native libraries and reimplemented it. It streams a
+stable 320×240 thermal image at **25 fps** on Windows.
 
-**Latest release: [v0.5.0-hotspot](releases/tag/v0.5.0-hotspot)** — hot-spot detection
-and a fix for a stall that left the window showing a static picture.
-
-## UI
-
-The viewer runs in a dark, HUD-style theme (Seek orange on deep navy, cyan
-readouts) matching the emblem icon (`assets/make_icon.py` builds it;
-PyInstaller embeds it into the exe). Diagnostics stay out of sight:
-
-- the log field is hidden — `Ctrl+L` shows/hides it
-- the dev upload row (frame upload to a dev host, endpoint retries, bind
-  probes) is hidden — `Ctrl+Alt+D` shows/hides it
-- the CLI dev modes still work as before: `--dev-serve`, `--dev-bind`,
-  `--dump-processed`, `--serve`, `--selftest`, `--check-pil`
+**Latest release: [v1.0.3](releases/tag/v1.0.3)**
 
 ## Quick start
 
 1. Download `SeekNano.exe` from the [releases page](releases).
-2. Windows will not have a driver for this camera. Run `SeekNanoDriverInstaller.exe`
-   from `SeekNano-driver.zip` once (Device Manager fallback in
+2. Windows has no driver for this camera. Run `SeekNanoDriverInstaller.exe` from
+   `SeekNano-driver.zip` once (Device Manager fallback in
    [app/README.md](app/README.md)).
 3. Plug the Nano in and run `SeekNano.exe`.
-4. Press **Start stream**, then **F** while pointing at a flat wall. That builds the
-   flat-field reference and the bad-pixel map, and it is worth doing every session —
-   see [Getting a clean image](#getting-a-clean-image).
+4. Press **S** to stream. Point at a flat wall and press **F** for the best
+   picture — see [Getting a clean image](#getting-a-clean-image).
 
 ## Controls
 
@@ -42,62 +28,97 @@ PyInstaller embeds it into the exe). Diagnostics stay out of sight:
 | **P** | Save PNG snapshot |
 | **D** | Dump raw frame |
 | **Space** | Pause |
+| **T** | Anchor a temperature point (hover the canvas first) |
+| **[** / **]** | Isotherm threshold down / up (seeds from the current frame) |
+| **O** | Toggle the diagnostic stamp |
 | **Q** | Quit |
+| **Ctrl+L** | Show / hide the log field |
+| **Ctrl+Alt+D** | Show / hide the dev row |
 
-Two more buttons cycle hot-spot detection: **hot spots** steps through
-`off → mark → outline → track → alarm`, and **sens** steps the detection sensitivity
-through `0.35 → 1.00 → 2.50`.
+Move the mouse over the canvas for a cursor readout with rubber-band region
+statistics and a line profile. The **hot spots** button cycles detection through
+`off → mark → outline → track → alarm`; **sens** cycles sensitivity through
+`0.35 → 1.00 → 2.50`.
+
+## Temperature
+
+The camera publishes no transfer function and no calibration is recoverable
+from the device — Seek's own baseline is nominally ±5 °C / 5 % on their
+pipelines alone. So the viewer starts in **device units (DL)** and says so.
+
+To get degrees, **anchor the scale against something you know**: hover the
+cursor over a surface of known temperature and press **T**, entering its value.
+Anchors persist in `seeknano_anchors.json` next to the exe.
+
+- 0 anchors → DL only (the honest default)
+- 1 anchor → offset only, level anchored
+- 2 anchors → the linear map between them
+
+Outside the anchor span the value extrapolates, and the display says so rather
+than presenting an invented number as a measurement.
 
 ## Hot-spot detection
 
-Finds regions that are notably hotter than the scene and reports where they are.
-Four modes, all sharing one detector:
+Finds regions notably hotter than the scene and reports where they are. Four
+modes over one detector: **mark** (box plus crosshair on the hottest),
+**outline**, **track** (fading trail, to watch a fault develop), **alarm**
+(flashes the frame border).
 
-- **mark** — box each region with a crosshair on the hottest
-- **outline** — box them without the crosshair
-- **track** — leave a fading trail so you can see a fault developing
-- **alarm** — flash the frame border while any region is detected
-
-**Values are in device units (DL), not degrees, and are labelled that way.** No
-absolute temperature is available from this camera: there is no calibration in the
-app, in this codebase, or in the captured symbol and string dumps. Reporting degrees
-would mean inventing a conversion, so the viewer does not pretend to. It labels each
-region relative to the current scene instead, which is the honest reading.
-
-Detection runs on corrected device-unit values *before* the contrast stretch.
-Stretching maps every frame across the full colormap, which would make every frame
-hot by construction and the question meaningless.
+Detection runs on corrected device-unit values *before* the contrast stretch —
+stretching maps every frame across the full colormap, which would make every
+frame hot by construction and the question meaningless.
 
 **Known limitation.** On a strongly textured scene the detector cannot be both
 sensitive and free of false positives. Measured on a synthetic ±160 DL periodic
-texture, a genuine +300 DL hotspot is only about 2× the scene's own variation, and
-the texture itself produces 21 candidate regions. That is a property of the scene
-rather than a defect in the detector, which is why the mode and sensitivity are
+texture, a genuine +300 DL hotspot is only about 2× the scene's own variation,
+and the texture alone produces 21 candidate regions. That is a property of the
+scene, not a defect in the detector — which is why the mode and sensitivity are
 user-selectable rather than tuned to a fixed answer.
 
 ## Getting a clean image
 
-**Press F on a flat wall each session.** The sensor's per-pixel offsets drift as it
-warms, so yesterday's reference actively hurts: measured on this hardware, a
-reference captured four hours earlier took the noise from 223 DL to 318 DL. The
-viewer judges the reference against live data and rejects it when it stops helping,
-but a fresh capture is always better. On a good capture the reference takes
-neighbour-difference noise from ~240 DL down to single digits.
+**Press F on a flat wall.** The sensor's per-pixel offsets drift as it warms, so
+an old reference actively hurts: measured here, a reference captured four hours
+earlier took the noise from 223 DL to 318 DL. References are now banked per gain,
+so the right one is restored at the gain that needs it. On a good capture the
+reference takes neighbour-difference noise from ~240 DL down to single digits.
 
-Defective elements are mapped separately. They are found by their *flicker* rather
-than their offset, judged across the captured frames against a temporal median so
-the fixed pattern cancels out. Judging a single averaged image missed four of six
-confirmed defects, because their offset moves between captures while they stay
-present in every frame.
+Defective elements are found by their **flicker** rather than their offset,
+judged across the captured frames against a temporal median so the fixed pattern
+cancels. Judging one averaged image missed four of six confirmed defects: their
+offset moved between captures (+1144…+1679 DL, then +707…+910 DL) while they
+stayed present in 100 % of live frames.
 
-> **Known uncertain:** the most recent real wall capture found **0** bad pixels,
-> where the earlier single-image test found 9 on that same reference. This is
-> unexplained and the bad-pixel map should not be trusted until a capture on a
-> uniform surface is checked.
+> **Known uncertain:** a real wall capture found **0** bad pixels where the
+> earlier single-image test found 9 on that same reference. Unexplained — the
+> bad-pixel map should not be trusted until a capture on a uniform surface is
+> checked.
+
+## Analysis
+
+- **Cursor readout** — point temperature and region statistics under the cursor
+- **Line profile** — drag across the canvas for a shift-drawn profile, sampled to
+  192 points. This is the FLIR-Tools signature: read the profile as you pan and
+  the frame collapse to zero is visible as the line dying at the edge
+- **Isotherms** — **[** and **]** step the threshold; it seeds from the current
+  frame's 90th percentile
+- **CSV export** — the corrected values of the frame on screen
+- **Replay** — `SeekNano.exe --replay capture.raw` plays a recording through the
+  entire analysis layer with no camera attached, so the same tools work offline
+
+## Headless modes
+
+| Flag | Purpose |
+|---|---|
+| `--serve [port]` | Stream every raw frame to the LAN as UDP packets |
+| `--replay <file>` | Analysis station over a recorded capture, no camera |
+| `--dump-processed <dir> [n]` | Write what the window would draw |
+| `--selftest` / `--check-pil` | CI gates, run by the build |
+| `--dev-serve`, `--dev-bind` | Development hooks |
 
 ## Performance
 
-Measured on the real device and measured on the **screen**, not just the app's
+Measured on the real device, and on the **screen** rather than just the app's
 output:
 
 | Metric | Value |
@@ -107,16 +128,21 @@ output:
 | Black frames in 250 screen grabs | **0** |
 | Bulk transfer failures | 0 |
 
-Two fixes mattered a lot here, both found by measuring rather than reading the code:
+The bugs that mattered most were all found by measuring rather than by reading
+code:
 
-- The 3×3 median cost **49 ms/frame** because `np.median` also computes the mean of
-  the two central elements — wasted work when the count is odd. `np.partition` at
-  k=4 is bit-identical and takes 25 ms. This was the stall: paints measured
-  **0.00/s**, so the window sat static while the reader thread logged frames.
-- Peak-finding for the hottest-region mode cost **50–79 ms/call** because it cut at
-  the 90th percentile, masked ~10% of the image, then built a full-frame boolean
-  mask per component. Replaced with local-maxima peak finding at ~10 ms, whose cost
-  no longer scales with how busy the scene is.
+- **`np.median` cost 49 ms/frame** on the 3×3 speckle median, because it also
+  forms the mean of the two central elements — wasted work for an odd count.
+  `np.partition(stack, 4, axis=0)[4]` is bit-identical at 25 ms. This was the
+  stall: paints measured **0.00/s** while the reader thread logged frames.
+- **A `ZeroDivisionError` froze the picture silently.** The pacing guard tested
+  `period` before the decrement but divided after it, so stepping 0.005 → 0.0
+  killed the reader thread and the GUI went on painting the last frame it had —
+  paints past 16,000 against a frozen `frame_seq`.
+- **PIL was never bundled**, so every released exe threw `ModuleNotFoundError`
+  once per frame — 5,517 times in one session. The retry backoff advanced the
+  wrong timestamp, so it never recovered. Now bundled, and CI asserts the frozen
+  exe can import it, so a missing bundle fails the build instead of reaching you.
 
 ## What the project found
 
@@ -134,45 +160,36 @@ downloadable app.
 | Usable image region | rows 12–251, cols 2–321 = **320 × 240** |
 | Frame rate | 25 fps, native |
 
-The 177,840-byte buffer is exactly 342×260 `uint16`, not a header plus image — that
-was confirmed against a captured phone trace. Frame kickoff is `58 5b 01 00`, which
-is byte-identical to the phone app's. Detail is in [docs/protocol.md](docs/protocol.md)
-and [docs/native-analysis.md](docs/native-analysis.md).
+The buffer is exactly 342×260 `uint16`, not a header plus an image — confirmed
+against a captured phone trace. Frame kickoff is `58 5b 01 00`, byte-identical
+to the phone app's. Detail in [docs/protocol.md](docs/protocol.md).
 
-### Three earlier "fixes" that were wrong, and were reverted
-
-Recorded because the measurements are the interesting part:
-
-- **Low-byte masking** — masked the low byte of each pixel on the theory it was
-  noise. It was real data; masking it destroyed the image.
-- **Full-background subtraction** — subtracting the whole averaged background
-  removed scene content along with the pattern.
-- **Temporal blend** — measurably reduced frame-to-frame movement (1.88×) and was
-  reverted anyway, because it ghosts whenever the scene shifts. Trading visible
-  ghosting for a better metric is a bad trade.
-
-A stutter was chased that did not exist; it turned out to be aliasing in my own
-sampling.
+Three earlier "fixes" were wrong and reverted: low-byte masking (destroyed real
+data), full-background subtraction (removed scene content), and a temporal
+blend — which measurably reduced frame-to-frame movement 1.88× and was reverted
+anyway because it ghosts when the scene shifts. Trading visible ghosting for a
+better metric is a bad trade.
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
-| `app/viewer.py` | The viewer. Pipeline, wx UI, USB transport |
+| `app/viewer.py` | The viewer: pipeline, UI, USB transport, analysis |
 | `app/hotspot.py` | Hot-spot detection (pure numpy, no scipy) |
-| `docs/` | Protocol notes, native analysis, symbols, [security posture](docs/security.md) |
-| `tests/` | portable suites run in CI (test_dev_mode.py, test_audit_fixes.py, gui_smoke.py) plus test_*.py hardware-verification suites written for the camera box (C:\a dev layout) |
-| `diagnostics/` | manual measurement / UI-driver scripts (run on the camera box) |
-| `data/` | live capture files referenced by the evidence suites |
-| `history/` | reverse-engineering evidence: analysis logs, spy-APK rebuild kit, trace artifacts |
-| `assets/` | emblem icon generator (icon.ico / icon_256.png) |
+| `docs/` | Protocol notes and analysis |
+| `tests/` | CI-portable suites plus hardware-verification scripts |
+| `diagnostics/` | Manual measurement and screen-capture drivers |
+| `history/` | Reverse-engineering record (APK analysis, spy tooling) |
+| `data/` | Recorded captures used by `--replay` |
+| `driver/`, `transport/` | Windows driver installer and native transport |
 
-Development hooks (`--dev-serve`, `--dev-bind`, the GUI dev row) are documented in
-the README history and remain for diagnostics.
+`tests/gui_smoke.py` drives the real wx GUI. It earned its place by catching two
+API mistakes that no unit test could see: `wx.EVT_CAPTURE_LOST` does not exist
+(it is `EVT_MOUSE_CAPTURE_LOST`), and `GetContainingWindow` is not a wx method.
 
 ## Legal note
 
-The APK is publicly distributed by Seek Thermal and was analysed here strictly for
-interoperability with hardware its owner already possesses. No Seek code or assets
-are redistributed in this repository — only our own analysis notes, scripts, and
-derived protocol documentation.
+The APK is publicly distributed by Seek Thermal and was analysed here strictly
+for interoperability with hardware its owner already possesses. No Seek code or
+assets are redistributed — only our own analysis notes, scripts, and derived
+protocol documentation.

@@ -461,6 +461,9 @@ ACCEL_KEY = {
     "Save PNG snapshot": "p",
     "Dump raw frame": "d",
     "Capture flat (wall)": "f",
+    "Anchor temperature": "t",
+    "Isotherm threshold": "[ ]",
+    "Diagnostic stamp": "o",
     "Quit": "q",
     "Pause": " ",
 }
