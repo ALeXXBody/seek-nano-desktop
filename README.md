@@ -161,8 +161,11 @@ sampling.
 | `app/viewer.py` | The viewer. Pipeline, wx UI, USB transport |
 | `app/hotspot.py` | Hot-spot detection (pure numpy, no scipy) |
 | `docs/` | Protocol notes, native analysis, symbols, [security posture](docs/security.md) |
-| `tests/` | portable suites run in CI (test_dev_mode.py, test_audit_fixes.py) plus test_*.py hardware-verification suites written for the camera box (C:a dev layout); manual measurement scripts live in diagnostics/ |
-| `artifacts/` | Captured phone trace and analysis logs |
+| `tests/` | portable suites run in CI (test_dev_mode.py, test_audit_fixes.py, gui_smoke.py) plus test_*.py hardware-verification suites written for the camera box (C:\a dev layout) |
+| `diagnostics/` | manual measurement / UI-driver scripts (run on the camera box) |
+| `data/` | live capture files referenced by the evidence suites |
+| `history/` | reverse-engineering evidence: analysis logs, spy-APK rebuild kit, trace artifacts |
+| `assets/` | emblem icon generator (icon.ico / icon_256.png) |
 
 Development hooks (`--dev-serve`, `--dev-bind`, the GUI dev row) are documented in
 the README history and remain for diagnostics.

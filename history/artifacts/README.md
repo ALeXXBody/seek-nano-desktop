@@ -3,7 +3,7 @@
 Track here only files we generated ourselves. The original `com.thermal.seeknano`
 APK/XAPK (Seek Thermal property) is **not** committed, per the legal note in the
 README — pull it e.g. from APKPure (`com.thermal.seeknano` v1.5.0, versionCode 27)
-and repro with the tools in `tools/rebuild-spy-apk.md`.
+and repro with the tools in `docs/rebuild.md` (moved: the kit lives in `history/tools/`).
 
 | File | Origin | Note |
 |---|---|---|
