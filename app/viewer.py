@@ -719,6 +719,55 @@ def _line_profile(img, p0, p1, n=192):
     return (top * (1.0 - ty) + bot * ty).astype(np.float32)
 
 
+# ---------------------------------------------------------------------------
+# Absolute temperature, two-point anchored (user-supplied exploit knowledge:
+# the Nano series is factory-baselined to ±5 °C / 5 % over -20 °C...330 °C
+# <35 mK NETD, but Seek publish no transfer function). We do NOT invent one:
+# the user anchors the DL->°C line on a surface they know, and the readout
+# is labelled accordingly.
+ANCHOR_NAME = "seeknano_anchors.json"
+
+
+def anchors_load():
+    try:
+        with open(ANCHOR_NAME, "r") as fh:
+            import json
+            return [(float(a["dl"]), float(a["c"])) for a in json.load(fh)]
+    except Exception:
+        return []
+
+
+def anchors_save(anchors):
+    import json
+    try:
+        with open(ANCHOR_NAME, "w") as fh:
+            json.dump([{"dl": d, "c": c} for d, c in anchors], fh)
+        return True
+    except Exception:
+        return False
+
+
+def dl_to_c(dl, anchors):
+    """Corrected DL -> °C through the user's anchor points.
+
+    0 anchors -> None (DL only, the honest default);
+    1 anchor   -> offset-only (level anchored, slope guessed from the
+                  sensor's native scale - the safest single-point form);
+    2 anchors  -> the linear map between them.
+
+    Outside the anchor span this extrapolates - the display says so.
+    """
+    if not anchors:
+        return None
+    if len(anchors) == 1:
+        d0, c0 = anchors[0]
+        return dl + (c0 - d0)
+    (d0, c0), (d1, c1) = anchors[0], anchors[1]
+    if d1 == d0:
+        return None
+    return c0 + (dl - d0) * (c1 - c0) / (d1 - d0)
+
+
 def _pil_image():
     """One PIL entry point used by every save path.
 
@@ -2274,9 +2323,14 @@ class Viewer(wx.Frame):
             if pt[0] is not None:
                 st = _sample_stats(img, pt)
                 if st is not None:
-                    chip("%d" % round(st[0]), mx + 12, my - 22,
+                    c = dl_to_c(st[0], getattr(self, "_anchors", None))
+                    ct = "" if c is None else "  %5.1f\u00b0C" % c
+                    chip("%d%s" % (round(st[0]), ct), mx + 12, my - 22,
                          fg=THEME["accent2"])
-                    chip("\u03bc %.1f  min %d  max %d" % (st[1], st[2], st[3]),
+                    cavg = dl_to_c(st[1], getattr(self, "_anchors", None))
+                    avg_s = ("%.1f\u00b0C" % cavg) if cavg is not None \
+                        else "%.1f" % st[1]
+                    chip("\u03bc %s  min %d  max %d" % (avg_s, st[2], st[3]),
                          mx + 12, my + 6)
 
     def _draw_profile_plot(self, dc, prof, cw, ch):
@@ -3007,10 +3061,26 @@ class Viewer(wx.Frame):
                     b = np.stack(self.bg_frames).mean(axis=0)
                     self.bg_hp = b - _boxblur(b, 9)   # precomputed once
                 if self.frame_raw is not None and not _frame_has_content(payload):
-                    # saturated frame: the auto-stretch would paint it solid
+                    # saturated frame: the auto-stretch would paint it solid.
+                    # But FIRST: a *uniform burst* is what the shutter click
+                    # looks like. The Nano's mechanical shutter (the audible
+                    # click) drops a blackbody flag over the sensor for a
+                    # second or so - the factory's own FFC moment. If we are
+                    # not already capturing a reference, take it for free.
+                    self.flat_run = getattr(self, "flat_run", 0) + 1
+                    if self.flat_run == 3 and self.ffc_collect is None:
+                        self.ffc_collect = []
+                        self.q.put(("log", "shutter click (uniform burst) "
+                                           "detected - FFC capture (auto)"))
+                    if self.ffc_collect is not None:
+                        self.ffc_collect.append(_roi_u16(payload))
+                        if len(self.ffc_collect) >= FFC_FRAMES:
+                            self._finish_flat()
+                            self.q.put(("log", "shutter FFC done (auto)"))
                     self.saturated += 1
                     self.push_status("gain %d saturated - holding" % hdr[2])
                     continue
+                self.flat_run = 0
                 self.shown_frames += 1
                 if self.shown_frames == 1:
                     self.push_status("streaming at gain %d" % hdr[2])
@@ -3243,6 +3313,35 @@ class Viewer(wx.Frame):
             self.iso_on = True
             self.push_status("isotherm on \u2265 %.0f" % self.iso_thr)
             self.video.Refresh()
+            ev.Skip()
+            return
+        if c == "t" and getattr(self, "mouse", None) is not None:
+            # two-point anchor: aim the cursor at a surface you know, type
+            # the °C value (factory baseline is ±5 °C / 5 % relative... but
+            # Seek publish no transfer function, so DECIDE it yourself)
+            dlg = wx.TextEntryDialog(
+                self, "anchor temperature (\\u00b0C) at the cursor:",
+                "Set anchor point")
+            if dlg.ShowModal() == wx.ID_OK:
+                try:
+                    self._anchors = list(getattr(self, "_anchors", []))
+                    dl = _sample_stats(getattr(self, "_analysis") or
+                                       np.zeros((1, 1), np.float32),
+                                       self._img_from_mouse(self.mouse))
+                    if dl is None:
+                        raise ValueError("no frame under the cursor")
+                    self._anchors.append(
+                        (float(dl[0]), float(dlg.GetValue().replace(",", "."))))
+                    # keep at most the two most recent, distinct anchors
+                    self._anchors = self._anchors[-2:]
+                    ok = anchors_save(self._anchors)
+                    self.push_status(
+                        "anchor set: %d anchors%s" % (
+                            len(self._anchors),
+                            " (saved)" if ok else " (NOT saved - read-only dir)"))
+                except Exception as e:
+                    self.push_status("anchor failed: %r" % e)
+            dlg.Destroy()
             ev.Skip()
             return
         if c in "scpodf" or k in (wx.WXK_ESCAPE, wx.WXK_SPACE):
