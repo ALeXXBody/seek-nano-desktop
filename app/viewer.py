@@ -2585,14 +2585,26 @@ class Viewer(wx.Frame):
                 # bytes object raises UFuncTypeError, so every earlier attempt
                 # wrote a header-only 8-byte stub and the fault was never
                 # actually captured - the log said "save failed" and moved on.
+                # Dump the array that was ACTUALLY SCORED, not self.frame_raw.
+                # self.frame_raw is rewritten by the reader thread for every
+                # frame that arrives, while this runs on the GUI thread over an
+                # older one - so saving frame_raw captured a different frame
+                # than the faulted one, and the row that z=35 was reported on
+                # came back perfectly normal (z 0.9) in the dump. Write the
+                # scored image first, then the raw payload alongside so the two
+                # can be compared.
+                scored = np.ascontiguousarray(img, dtype=np.float32)
                 raw = np.frombuffer(self.frame_raw, dtype=np.uint8)
                 with open(p, "wb") as fh:
                     fh.write(struct.pack("<IHH", n, SCAN_FAULT_Z_INT, row))
+                    fh.write(struct.pack("<I", scored.size))
+                    fh.write(scored.tobytes())
                     fh.write(raw.tobytes())
                 self.q.put(("log", "scanline fault: row %d at z %.1f -> %s"
                                    % (row, zmax, os.path.basename(p))))
-                _vlog("SCANFAULT", "row=%d z=%.1f median=%.1f n=%d bytes=%d"
-                      % (row, zmax, med, n, raw.size))
+                _vlog("SCANFAULT", "row=%d z=%.1f median=%.1f n=%d "
+                                  "scored=%d raw=%d"
+                      % (row, zmax, med, n, scored.size, raw.size))
             except Exception as e:
                 self.q.put(("log", "scanline fault save failed: %r" % (e,)))
 

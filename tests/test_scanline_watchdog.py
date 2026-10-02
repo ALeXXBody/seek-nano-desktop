@@ -126,16 +126,28 @@ check(any("scanline fault" in m[1] for m in p.q.msgs),
 if dumps:
     blob = open(dumps[0], "rb").read()
     import struct
-    n, zint, row = struct.unpack("<IHH", blob[:8])
-    body = blob[8:]
-    check(len(body) == IH * IW * 2,
-          "the dump carries a full %d B frame payload, not a header stub"
-          % (IH * IW * 2))
-    px = np.frombuffer(body, dtype="<u2").reshape(IH, IW)
-    check(px.shape == (IH, IW), "and reshapes to %dx%d" % (IW, IH))
-    check(row == 118, "and it names the offending row (%d)" % row)
-    check(np.array_equal(px, np.frombuffer(p.frame_raw, dtype=np.uint16)
-                         .reshape(IH, IW)), "and the frame is byte-identical")
+    n, zint, row = struct.unpack("<IHH", blob[:12][:8])
+    npx = struct.unpack("<I", blob[8:12])[0]
+    scored = np.frombuffer(blob[12:12 + npx * 4], dtype=np.float32)
+    raw = blob[12 + npx * 4:]
+    check(scored.size == IH * IW,
+          "the dump carries the SCORED image (%d px), which is where the "
+          "fault was measured" % scored.size)
+    check(scored.size == IH * IW and np.isfinite(scored).all(),
+          "the scored image is complete and finite")
+    check(len(raw) > 1000,
+          "and the raw payload alongside it (%d bytes), for comparison" % len(raw))
+    check(row == 118, "it names the offending row (%d)" % row)
+    # the row that scored high must be the row that is extreme in the DUMP -
+    # this is the check that would have caught saving frame_raw instead
+    s = scored.reshape(IH, IW)
+    prof = np.abs(np.diff(s, axis=1)).mean(axis=1)
+    md = float(np.median(prof))
+    mad = float(np.median(np.abs(prof - md)))
+    zr = prof[118] / max(md + 3 * mad, 1e-3)
+    check(zr > 8,
+          "row 118 is still extreme in the dumped image (z %.1f) - the dump "
+          "and the score agree" % zr)
     os.remove(dumps[0])
 
 print("\n3. a 5-second rate limit stops a persistent fault flooding the disk")
