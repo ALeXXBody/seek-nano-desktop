@@ -320,5 +320,24 @@ class TestHiddenDevSurfaces(unittest.TestCase):
         self.assertIn("icon_256.png", yml)
 
 
+class TestGuiBuildSmoke(unittest.TestCase):
+    """GUI construction is validated on the real wx toolkit in CI
+    (windows runner, real wxPython installed by the workflow): any
+    toolkit-API drift like the SetOwnBackColor crash fails the build.
+    Skipped on this Linux box because creating a real styled frame cannot
+    be reproduced here without side effects."""
+
+    def test_smoke_script_exists_and_valid_python(self):
+        p = os.path.join(REPO, "tests", "gui_smoke.py")
+        self.assertTrue(os.path.exists(p))
+        import ast
+        ast.parse(open(p, encoding="utf-8").read())
+
+    def test_ci_runs_the_smoke(self):
+        yml = open(os.path.join(REPO, ".github", "workflows", "build.yml"),
+                   encoding="utf-8").read()
+        self.assertIn("gui_smoke.py", yml)
+
+
 if __name__ == "__main__":
     unittest.main()

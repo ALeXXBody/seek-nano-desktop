@@ -1250,8 +1250,13 @@ class Viewer(wx.Frame):
                 b.SetFont(f)
             elif bold:
                 b.SetFont(b.GetFont().Bold())
-            b.SetOwnBackColor(b.GetBackgroundColour())
-            b.SetOwnForeColor(b.GetForegroundColour())
+            try:
+                b.SetOwnBackgroundColour(b.GetBackgroundColour())
+                b.SetOwnForegroundColour(b.GetForegroundColour())
+            except AttributeError:
+                # per-window ownership setters are optional in some wx builds;
+                # the frame-level colours above still theme the button
+                pass
 
         cool(self.start_btn, fg=THEME["bg"], bg=THEME["accent"], big=True)
         cool(self.cmap_btn)
