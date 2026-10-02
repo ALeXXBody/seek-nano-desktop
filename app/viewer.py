@@ -4058,6 +4058,35 @@ if __name__ == "__main__":
             print("check-pil FAIL: %r" % e)
             sys.exit(1)
         print("check-pil ok")
+    elif "--check-assets" in sys.argv:
+        # assets/icon_256.png is read via sys._MEIPASS and hotspot.py is imported
+        # from the bundle. Neither is reachable at module scope, so nothing else
+        # proves they were packaged: a local build that omitted --add-data made
+        # an exe that failed at runtime with wx logging
+        #     Failed to load image from file ..._MEIxxxx\assets\icon_256.png
+        # while the try/except around the load swallowed it and carried on with
+        # no emblem. CI always passed --add-data; only a hand-rolled build missed
+        # it. So assert the bundle, the same way check_pil asserts Pillow.
+        import importlib.util
+        want = ["assets/icon_256.png", "hotspot.py"]
+        base = (sys._MEIPASS if getattr(sys, "frozen", False)
+                and hasattr(sys, "_MEIPASS")
+                else os.path.dirname(os.path.abspath(__file__)))
+        bad = []
+        for rel in want:
+            p = os.path.join(base, *rel.split("/"))
+            if not os.path.isfile(p):
+                bad.append("%s (looked in %s)" % (rel, base))
+        if getattr(sys, "frozen", False) \
+                and importlib.util.find_spec("hotspot") is None:
+            bad.append("hotspot is not importable from the bundle")
+        if bad:
+            print("check-assets FAIL: " + "; ".join(bad))
+            sys.exit(1)
+        print("check-assets ok: " + ", ".join(
+            "%s (%d B)" % (r, os.path.getsize(
+                os.path.join(base, *r.split("/")))) for r in want))
+        sys.exit(0)
     elif "--dump-processed" in sys.argv:
         # headless: write what the window would draw, to confirm the pipeline
         i = sys.argv.index("--dump-processed") + 1
