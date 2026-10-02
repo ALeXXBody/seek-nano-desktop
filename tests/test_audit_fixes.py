@@ -451,5 +451,32 @@ class TestRecordReplayCsvAnchors(unittest.TestCase):
         self.assertIn("1234.5", rows[1])
 
 
+    def test_hotspot_stability_filter(self):
+        """Detection jitter must not strobe the boxes: a region renders only
+        from the 3rd consecutive frame where it survives."""
+        import numpy as np_
+        img = np_.zeros((240, 320), np.float32)
+        img[200:216, 40:56] = 5000.0     # a solid hotspot
+        v = viewer.Viewer.__new__(viewer.Viewer)
+        v.spot_mode = "outline"
+        v.spot_sens = 1.0
+        v.spots = []
+        v.spot_hist = []
+        v.spot_alarm = 0.0
+        v.spot_alarm_on = False
+        v._spot_seen = {}
+        for i in range(6):
+            v._detect_spots(img)
+            if i < 2:
+                self.assertEqual(len(v.spots), 0,
+                                 "jitter must not render on frame %d" % i)
+        self.assertGreaterEqual(len(v.spots), 1,
+                                "a stable hotspot renders from frame 3")
+        # and turning the mode off clears everything
+        v.spot_mode = "off"
+        v._detect_spots(img)
+        self.assertEqual(v.spots, [])
+
+
 if __name__ == "__main__":
     unittest.main()

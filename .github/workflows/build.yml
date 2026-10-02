@@ -85,6 +85,8 @@ jobs:
             --collect-all libusb_package `
             --collect-all PIL `
             --add-data "assets\\icon_256.png;assets" `
+            --add-data "app\\hotspot.py;." `
+            --hidden-import hotspot `
             --hidden-import usb.backend.libusb10 `
             app/viewer.py
         shell: powershell

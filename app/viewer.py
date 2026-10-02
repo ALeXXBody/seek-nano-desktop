@@ -442,6 +442,7 @@ FFC_NAME = "ffc_latest.raw"   # on-disk reference, ROI-shaped uint16 (240x320)
 BG_FRAMES = 8          # rolling frames for the no-reference background estimate
 DISPLAY_SMOOTH = 3     # box blur after correction; see _process.
 LATEST_PNG = "latest.png"   # newest displayed frame, overwritten ~1 Hz
+SEEKNANO_LATEST = os.environ.get("SEEKNANO_LATEST", "") not in ("", "0")
 FFC_GAIN = "ffc_latest.gain"  # gain the reference was captured at
 FFC_BANK = "ffc_bank.npy"   # the individual captured frames, not just their mean
 BAD_NAME = "badpixels.bin"   # mask of defective elements, ROI-shaped uint8
@@ -1571,6 +1572,11 @@ class TelemetryBlock(wx.Panel):
             self.gain = gain
         if seq is not None:
             self.seq = seq
+        try:
+            top = wx.GetTopLevelParent(self)   # the Viewer frame holds _anchors
+            self.state_anchored = bool(getattr(top, "_anchors", None))
+        except Exception:
+            self.state_anchored = False
         self.Refresh()
 
     def on_paint(self, ev):
@@ -1609,6 +1615,11 @@ class TelemetryBlock(wx.Panel):
         line = "   ".join(comp) if comp else ""
         if line:
             dc.DrawText(line, 16, 52)
+        # the anchored-°C state, so its absence is explicable on screen
+        if getattr(self, "state_anchored", None):
+            dc.DrawText("anchored \u00b0C (t re-sets)", 16, 68)
+        else:
+            dc.DrawText("DL only - hover + t to anchor \u00b0C", 16, 68)
         # the ironbow identity bar across the bottom
         bar_w = max(1, w - 32)
         for i in range(bar_w):
@@ -2463,6 +2474,15 @@ class Viewer(wx.Frame):
             self.spots = []
             return
         try:
+            # hotspot.py lives next to viewer.py: make that importable on
+            # every route (frozen onefile resolves via _MEIPASS when the
+            # module is bundled; bare-run needs the app dir on sys.path).
+            # The failure mode before this fix: the import raised inside a
+            # windowed build's silent catch, spots stayed [] forever while
+            # the button still cycled - "no data, artifacts".
+            _here = os.path.dirname(os.path.abspath(__file__))
+            if _here not in sys.path:
+                sys.path.insert(0, _here)
             import hotspot as _hs
             mode = "top" if self.spot_mode == "alarm" else "auto"
             self.spots = _hs.detect(img, sensitivity=self.spot_sens,
@@ -2472,13 +2492,26 @@ class Viewer(wx.Frame):
             self.spots = []
             return
         now = time.time()
-        for g in self.spots:
+        # temporal stability: a region must persist over consecutive frames
+        # to be drawn. Detection jitter (a threshold that lands on noise)
+        # made the boxes and the alarm border strobe - the "artifacts" seen
+        # when hot-spots were enabled. A real hotspot is there for seconds.
+        seen = dict(getattr(self, "_spot_seen", {}))
+        keys = [(int(g["y"]) // 8, int(g["x"]) // 8) for g in self.spots]
+        for k_ in keys:
+            seen[k_] = seen.get(k_, 0) + 1
+        stable = [g for g, k_ in zip(self.spots, keys) if seen.get(k_, 0) >= 3]
+        self._spot_seen = {k: v for k, v in seen.items() if v < 90}
+        for g in stable:
             self.spot_hist.append((now, g["y"], g["x"], g["peak"]))
         # forget anything older than the hold time
         self.spot_hist = [h for h in self.spot_hist
                           if now - h[0] <= HOTSPOT_HOLD]
         if len(self.spot_hist) > 400:
             self.spot_hist = self.spot_hist[-400:]
+        # the drawn boxes + the alarm both consume the STABLE set, so
+        # frame-to-frame detector jitter cannot strobe the overlay
+        self.spots = stable
         if self.spot_mode == "alarm" and self.spots:
             self.spot_alarm = now
             self.spot_alarm_on = True
@@ -2931,12 +2964,13 @@ class Viewer(wx.Frame):
         return rgb
 
     def _dump_pngs(self, rgb):
-        """Write latest.png and the burst ring.
+        """Write the diagnostic thrill: burst ring / latest.png.
 
-        Deliberately NOT called from the paint handler. A PNG encode measured
-        8.00 ms and this ran once per paint, inside WM_PAINT, so every repaint
-        spent most of its time compressing a diagnostic file. It is driven from
-        the timer instead, which keeps the paint path to a blit.
+        BOTH default OFF in the shipped viewer. The user asked to have the
+        diagnostics hidden, not removed. The last-frame remember-dump was
+        overlooked when the burst ring was silenced - it wrote latest.png
+        once a second next to the exe for no product purpose.
+        Latest: SEEKNANO_LATEST=1; burst ring: SEEKNANO_BURST=12.
         """
         now = time.time()
         if getattr(self, "_dump_disabled", False):
@@ -2960,7 +2994,7 @@ class Viewer(wx.Frame):
                 i = int(getattr(self, "_burst_i", 0)) % BURST
                 self._burst_i = i + 1
                 im.save("burst_%02d.png" % i)
-            if now - getattr(self, "_last_dump", 0) > 1.0:
+            if SEEKNANO_LATEST and now - getattr(self, "_last_dump", 0) > 1.0:
                 self._last_dump = now
                 im.save(LATEST_PNG)
         except Exception as e:
@@ -3427,6 +3461,8 @@ class Viewer(wx.Frame):
                 self.push_status("anchor set: %d anchors%s" % (
                     len(self._anchors),
                     " (saved)" if ok else " (NOT saved - read-only dir)"))
+                if getattr(self, "telemetry", None) is not None:
+                    self.telemetry.state_anchored = True
             except Exception as e:
                 self.push_status("anchor failed: %r" % e)
         dlg.Destroy()
