@@ -41,7 +41,8 @@ def check(cond, msg):
 
 for name in ("_bmp", "_process", "_overlay", "_text", "_boxblur", "_apply_ffc",
              "_roi_u16", "_validate_ffc", "_nuc2d", "_neighbour_median",
-             "_apply_bad_pixels", "_detect_spots", "_draw_hotspots"):
+             "_apply_bad_pixels", "_detect_spots", "_draw_hotspots",
+             "_scanline_health"):
     fn = next((n for n in ast.walk(tree)
                if isinstance(n, ast.FunctionDef) and n.name == name), None)
     if fn is None:

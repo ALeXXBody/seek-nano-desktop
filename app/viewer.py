@@ -502,6 +502,13 @@ HOTSPOT_SENS = 1.0        # scales how far above the scene a region must sit
 HOTSPOT_MAX = 5           # how many to report at once
 SPOT_STABLE = 3           # frames of evidence before a region is drawn
 SPOT_MOVE = 24            # px a region may drift and keep its stability score
+# A row whose within-row variation exceeds the frame's own robust spread by
+# this factor is treated as a corrupted scanline and the frame is kept.
+# Calibrated against clean live frames: normal rows sit below 4x, the band seen
+# on screen sat at 3.7x of a much noisier capture, so 8 is deliberately high -
+# better to save a few extra frames than to miss the fault.
+SCAN_FAULT_Z = 8.0
+SCAN_FAULT_Z_INT = 8      # integer copy stored in the dump header
 HOTSPOT_HOLD = 1.6        # "track": seconds a spot stays in the history
 
 
@@ -2520,6 +2527,72 @@ class Viewer(wx.Frame):
             "%d" % thr if thr is not None else "-",
             n if n is not None else "-"), cw - 150, 12)
 
+    def _scanline_health(self, img):
+        """Watch for a corrupted scanline, and save the frame when one appears.
+
+        There is a visible fault - a full-width horizontal band of broken colour
+        confined to one or two rows - that has resisted every cheap explanation.
+        Measured so far, by elimination rather than by argument:
+
+          * it is not the hot-spot overlay: it is corrupted IMAGE DATA, and no
+            drawing code can corrupt pixels
+          * not the camera or the USB transfer: 60 frames pulled straight off the
+            wire were clean
+          * not _roi_u16, the 3x3 median, _nuc2d or _apply_ffc: a real frame
+            walked through each stage is clean at all four
+          * not the cursor / line-profile overlay: identical with the cursor on
+            and off the canvas
+          * not a mid-frame gain switch: a 240-frame burst with 26 gain
+            transitions (gains 1..28) produced no seam and no dashes
+
+        What is left is something that needs a frame WITH the fault in it, and
+        it has not reproduced on demand. So the viewer now measures itself and
+        keeps the evidence: a compact health line goes to the verbose log, and
+        the moment a row scores far outside the frame's own spread, the raw
+        frame is written next to the exe.
+
+        Cheap by construction - one mean and one diff over the frame, every
+        frame, no allocation beyond the row profile.
+        """
+        n = getattr(self, "_scan_n", 0) + 1
+        self._scan_n = n
+        prof = np.abs(np.diff(img, axis=1)).mean(axis=1)
+        med = float(np.median(prof))
+        mad = float(np.median(np.abs(prof - med)))
+        scale = max(med + 3.0 * mad, 1e-3)
+        z = prof / scale
+        row = int(np.argmax(z))
+        zmax = float(z[row])
+        self._scan_z = zmax
+        self._scan_row = row
+        if n % 25 == 0:
+            try:
+                _vlog("SCAN", "row-profile max z %.1f at row %d (median %.1f DL)"
+                           % (zmax, row, med))
+            except Exception:
+                pass
+        # Rate-limited: only the first fault every 5 s is kept, so a persistent
+        # fault cannot fill the disk.
+        if zmax > SCAN_FAULT_Z and time.time() - getattr(
+                self, "_scan_last_save", 0.0) > 5.0:
+            self._scan_last_save = time.time()
+            try:
+                import struct
+                # relative, like every other dump: the app chdirs to the exe
+                # directory at startup, so this lands next to SeekNano.exe
+                p = "scanline_fault_%d.raw" % n
+                with open(p, "wb") as fh:
+                    fh.write(struct.pack("<I", n))
+                    fh.write(struct.pack("<HH", SCAN_FAULT_Z_INT, row))
+                    fh.write(np.clip(self.frame_raw, 0, 65535)
+                             .astype("<u2").tobytes())
+                self.q.put(("log", "scanline fault: row %d at z %.1f -> %s"
+                                   % (row, zmax, os.path.basename(p))))
+                _vlog("SCANFAULT", "row=%d z=%.1f median=%.1f n=%d"
+                      % (row, zmax, med, n))
+            except Exception as e:
+                self.q.put(("log", "scanline fault save failed: %r" % (e,)))
+
     def _detect_spots(self, img):
         """Run the detector on corrected device-unit values and update state."""
         if self.spot_mode == "off":
@@ -2908,6 +2981,7 @@ class Viewer(wx.Frame):
         # the question is meaningless. Here "hot" means hot compared with this
         # scene, which is the only honest reading without absolute calibration.
         self._detect_spots(img)
+        self._scanline_health(img)
         p1 = np.pad(img, 1, mode="edge")
         stack = np.stack([p1[dy:dy + IMG_H, dx:dx + IMG_W]
                           for dy in range(3) for dx in range(3)])
