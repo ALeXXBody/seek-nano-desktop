@@ -64,8 +64,13 @@ jobs:
         run: python tests/test_audit_fixes.py
         shell: bash
       - name: gui build smoke (real wx on this runner)
-        run: python tests/gui_smoke.py
         shell: bash
+        run: |
+          python --version
+          python -u -X faulthandler tests/gui_smoke.py
+          rc=$?
+          echo "smoke exit=$rc"
+          exit $rc
       - name: pytest gate (portable, hardware-free suites only)
         run: python -m pytest tests/test_audit_fixes.py tests/test_dev_mode.py -q
         shell: bash

@@ -27,3 +27,4 @@ seeknano_verbose.log
 nuc_out/
 .pytest_cache/
 *.png
+*.snrec
