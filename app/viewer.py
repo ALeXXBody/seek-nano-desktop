@@ -506,7 +506,10 @@ SPOT_STABLE = 3           # frames of evidence before a region is drawn
 # momentary dropout; the camera itself occasionally wedges and only a physical
 # unplug/replug clears that, so the retries are capped and then say so.
 USB_RETRY_MAX = 6
-USB_RETRY_DELAY = 3.0
+# Milliseconds, as an int. wx.CallLater builds a wx.Timer and calls Start(),
+# which rejects a float outright - "Timer.Start(): argument 1 has unexpected
+# type 'float'" - and that is a hard crash in the event handler, not a no-op.
+USB_RETRY_DELAY_MS = 3000
 
 
 def _is_usb_timeout(payload):
@@ -2248,6 +2251,11 @@ class Viewer(wx.Frame):
         # sheared every saved snapshot by one pixel and cut the last row.
         # Saved image == displayed image: same FFC + median + NUC pipeline.
         img_arr = self._process(_roi_u16(self.frame_raw))
+        if img_arr is None:
+            # _process returns None for a rejected frame (mid-frame gain
+            # change). Calling .min() on None is how this path used to crash.
+            self.push_status("snapshot skipped - frame rejected")
+            return
         vmin, vrange = img_arr.min(), max(1, img_arr.max() - img_arr.min())
         t = (img_arr.astype(np.float32) - vmin) / vrange
         rgb = COLORMAPS[self.lut_i][1](t)
@@ -3504,10 +3512,11 @@ class Viewer(wx.Frame):
                         self.push_status("USB timeout - reconnecting (%d/%d)"
                                          % (n, USB_RETRY_MAX))
                         _vlog("LOG", "USB timeout, reconnect %d/%d in %.1fs"
-                              % (n, USB_RETRY_MAX, USB_RETRY_DELAY))
+                              % (n, USB_RETRY_MAX,
+                                 USB_RETRY_DELAY_MS / 1000.0))
                         self.stream_thread = None
                         self.start_btn.SetLabel("Reconnecting...")
-                        wx.CallLater(USB_RETRY_DELAY * 1000,
+                        wx.CallLater(int(USB_RETRY_DELAY_MS),
                                      self._usb_reconnect)
                         return
                     self.push_status(
