@@ -8,6 +8,20 @@ stable 320×240 thermal image at **25 fps** on Windows.
 
 **Latest release: [v1.0.3](releases/tag/v1.0.3)**
 
+## Interface
+
+The picture runs **full-bleed** to the window edge. A thin HUD strip across the
+top carries the status headline plus `fps / gain / seq` and whether the °C scale
+is anchored; a slim icon rail down the right holds the controls. Every rail
+control carries a tooltip, and the same actions are on the keyboard.
+
+Icons rather than word labels, deliberately: wxWindows subpixel-renders text
+over a dark background, which fringed every label red/blue/cyan (measured: 88%
+of glyph pixels carried colour spread). A glyph has no subpixels to fringe.
+
+Diagnostics stay out of the way — `Ctrl+L` shows the log field, `Ctrl+Alt+D`
+the dev row.
+
 ## Quick start
 
 1. Download `SeekNano.exe` from the [releases page](releases).
@@ -36,9 +50,9 @@ stable 320×240 thermal image at **25 fps** on Windows.
 | **Ctrl+Alt+D** | Show / hide the dev row |
 
 Move the mouse over the canvas for a cursor readout with rubber-band region
-statistics and a line profile. The **hot spots** button cycles detection through
-`off → mark → outline → track → alarm`; **sens** cycles sensitivity through
-`0.35 → 1.00 → 2.50`.
+statistics and a line profile. The rail's crosshair button cycles hot-spot
+detection through `off → mark → outline → track → alarm`; the one below it
+cycles sensitivity through `0.35 → 1.00 → 2.50`.
 
 ## Temperature
 
