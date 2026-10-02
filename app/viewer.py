@@ -939,6 +939,46 @@ class NativeStream(threading.Thread):
 
 
 
+class ReplayThread(threading.Thread):
+    """Feeds recorded frames (rec_*.snrec) through the queue, no camera.
+
+    Paced at the on-screen frame period; stop_flag drives it. --replay
+    file: the viewer then becomes an analysis station for a capture:
+    pause (space), frame dump/CSV, isotherm, profiles - all the analysis
+    layer works exactly as live.
+    """
+
+    NAME = "replay"
+
+    def __init__(self, q, path):
+        super().__init__(daemon=True)
+        self.q = q
+        self.path = path
+        self.stop_flag = threading.Event()
+        # explode once up front so a corrupt file fails loudly in the log
+        data = open(path, "rb").read()
+        if not data:
+            raise RuntimeError("replay file is empty: " + path)
+        self.frames = [data[i:i + FRAME_BYTES]
+                       for i in range(0, len(data) - FRAME_BYTES + 1,
+                                      FRAME_BYTES)
+                       if data[i:i + 2] == b"\x79\x05"]
+        self.q.put(("log", "replay: %d frames from %s" % (
+            len(self.frames), os.path.basename(path))))
+
+    def run(self):
+        for i, frame in enumerate(self.frames):
+            if self.stop_flag.is_set():
+                break
+            t0 = time.time()
+            self.q.put(("frame", frame))
+            wait = 0.04 - (time.time() - t0)
+            if wait > 0:
+                time.sleep(wait)
+        if not self.stop_flag.is_set():
+            self.q.put(("status", "replay finished"))
+
+
 class Stream(threading.Thread):
     def __init__(self, q, status_cb=None, upload_target=None, upload_port=None):
         super().__init__(daemon=True)
@@ -1857,6 +1897,19 @@ class Viewer(wx.Frame):
             self.stream_thread = None
             self.start_btn.SetLabel("Start stream")
             self.push_status("stopped")
+            return
+        if getattr(self, "replay_path", None):
+            # replay mode: play the recorded file instead of opening the camera
+            try:
+                thread = ReplayThread(self.q, self.replay_path)
+            except Exception as e:
+                self.push_status("replay failed: %r" % e)
+                self.q.put(("log", "replay failed: %r" % e))
+                return
+            self.q.put(("log", "replay starting..."))
+            self.start_btn.SetLabel("Stop stream")
+            self.stream_thread = thread
+            self.stream_thread.start()
             return
         self.frame_raw = None
         self.last_fid = None      # new stream: accept any sequence again
@@ -3112,6 +3165,9 @@ class Viewer(wx.Frame):
                                    self.held_gain, self.saturated, hdr[2],
                                    hdr[1])))
                 self.frame_raw = payload
+                if getattr(self, "rec_f", None) is not None:
+                    self.rec_f.write(payload)
+                    self.rec_n += 1
                 # which frame the screen will be showing after the next paint
                 self._paint_seq = hdr[1]
                 if self.ffc_collect is not None:
@@ -3159,7 +3215,56 @@ class Viewer(wx.Frame):
         if self.frame_raw and not self.paused:
             self.video.Refresh()
 
-    # ---- canvas analysis interactions ---------------------------------------
+    # ---- recording / replay / CSV -------------------------------------------
+
+    def on_record(self, ev):
+        """R: start/stop raw recording into rec_<ts>.snrec.
+
+        The record is the FRAMES AS DELIVERED (177 840 B each, concatenated)
+        - replay can therefore be bit-exact, scrubbed and diffed offline
+        without the camera attached.
+        """
+        if getattr(self, "rec_f", None) is not None:
+            self.rec_f.close()
+            self.rec_f = None
+            self.q.put(("log", "recording stopped - %s (%d frames)"
+                               % (self.rec_name, self.rec_n)))
+            self.push_status("record saved: " + self.rec_name)
+            return
+        if not self.frame_raw:
+            self.push_status("start the stream, then press R to record")
+            return
+        self.rec_name = "rec_%d.snrec" % int(time.time())
+        self.rec_f = open(self.rec_name, "wb")
+        self.rec_n = 0
+        self.q.put(("log", "recording -> %s (press R again to stop)"
+                           % self.rec_name))
+        self.push_status("recording...")
+
+    def _export_csv(self, ev):
+        """X: corrected values of the frame on screen -> CSV.
+
+        Machine-readable export of the analysis layer, one row per pixel
+        (index, x, y, corrected DL, and the anchored °C when set)."""
+        ana = getattr(self, "_analysis", None)
+        if ana is None:
+            self.push_status("nothing to export - no frame on screen")
+            return
+        name = "frame_%d.csv" % int(time.time())
+        ih, iw = ana.shape
+        ancf = getattr(self, "_anchors", None)
+        with open(name, "w") as fh:
+            fh.write("index,x,y,DL,degC\n")
+            for y_ in range(ih):
+                for x_ in range(iw):
+                    dl = float(ana[y_, x_])
+                    c = dl_to_c(dl, ancf)
+                    fh.write("%d,%d,%d,%.1f,%s\n" % (
+                        y_ * iw + x_, x_, y_, dl,
+                        "" if c is None else "%.2f" % c))
+        self.q.put(("log", "CSV written: %s (%d rows)" % (name, ih * iw)))
+        self.push_status("exported " + name)
+
 
     def on_motion_canvas(self, ev):
         self.mouse = ev.GetPosition()
@@ -3261,6 +3366,12 @@ class Viewer(wx.Frame):
         key = ch.lower() if ch else ""
         if key == "s":
             self.on_toggle(None)
+        elif key == "r":
+            self.on_record(None)
+        elif key == "x":
+            self._export_csv(None)
+        elif key == "t":
+            self.on_anchor(None)
         elif key == "c":
             self.on_cmap(None)
         elif key == "p":
@@ -3276,6 +3387,35 @@ class Viewer(wx.Frame):
             if not self.paused:
                 self._display_raw = self.frame_raw
             self.push_status("paused" if self.paused else "running")
+
+    def on_anchor(self, ev):
+        """t: two-point anchor - aim the cursor at a surface you know, type
+        the \\u00b0C value (Seek publish no transfer function: the factory
+        baseline is \\u00b15\\u00b0C / 5 % on their pipelines alone)."""
+        if getattr(self, "mouse", None) is None:
+            self.push_status("hover the canvas first, then press t")
+            return
+        dlg = wx.TextEntryDialog(
+            self, "anchor temperature (\\u00b0C) at the cursor:",
+            "Set anchor point")
+        if dlg.ShowModal() == wx.ID_OK:
+            try:
+                self._anchors = list(getattr(self, "_anchors", []))
+                st = _sample_stats(
+                    getattr(self, "_analysis") or np.zeros((1, 1), np.float32),
+                    self._img_from_mouse(self.mouse))
+                if st is None:
+                    raise ValueError("no frame under the cursor")
+                self._anchors.append(
+                    (float(st[0]), float(dlg.GetValue().replace(",", "."))))
+                self._anchors = self._anchors[-2:]
+                ok = anchors_save(self._anchors)
+                self.push_status("anchor set: %d anchors%s" % (
+                    len(self._anchors),
+                    " (saved)" if ok else " (NOT saved - read-only dir)"))
+            except Exception as e:
+                self.push_status("anchor failed: %r" % e)
+        dlg.Destroy()
 
     def on_key(self, ev):
         """Hotkeys documented in app/README.md: s c p d f q (and space).
@@ -3315,33 +3455,8 @@ class Viewer(wx.Frame):
             self.video.Refresh()
             ev.Skip()
             return
-        if c == "t" and getattr(self, "mouse", None) is not None:
-            # two-point anchor: aim the cursor at a surface you know, type
-            # the °C value (factory baseline is ±5 °C / 5 % relative... but
-            # Seek publish no transfer function, so DECIDE it yourself)
-            dlg = wx.TextEntryDialog(
-                self, "anchor temperature (\\u00b0C) at the cursor:",
-                "Set anchor point")
-            if dlg.ShowModal() == wx.ID_OK:
-                try:
-                    self._anchors = list(getattr(self, "_anchors", []))
-                    dl = _sample_stats(getattr(self, "_analysis") or
-                                       np.zeros((1, 1), np.float32),
-                                       self._img_from_mouse(self.mouse))
-                    if dl is None:
-                        raise ValueError("no frame under the cursor")
-                    self._anchors.append(
-                        (float(dl[0]), float(dlg.GetValue().replace(",", "."))))
-                    # keep at most the two most recent, distinct anchors
-                    self._anchors = self._anchors[-2:]
-                    ok = anchors_save(self._anchors)
-                    self.push_status(
-                        "anchor set: %d anchors%s" % (
-                            len(self._anchors),
-                            " (saved)" if ok else " (NOT saved - read-only dir)"))
-                except Exception as e:
-                    self.push_status("anchor failed: %r" % e)
-            dlg.Destroy()
+        if c == "t":
+            self.on_anchor(None)
             ev.Skip()
             return
         if c in "scpodf" or k in (wx.WXK_ESCAPE, wx.WXK_SPACE):
@@ -3657,8 +3772,7 @@ def selftest():
             sys.exit(1)
     sys.exit(0)
 
-def _run_gui(autostart=False):
-    # Hang diagnostics. A GUI that stops painting looks identical to one that is
+def _run_gui(autostart=False):    # Hang diagnostics. A GUI that stops painting looks identical to one that is
     # merely showing a static scene - the title bar says "Not Responding", the
     # image is frozen, and the reader thread keeps logging frames, so from the
     # outside there is nothing to tell a hang from a quiet camera. Dumping every
@@ -3770,8 +3884,22 @@ def dump_mode(outdir="dump", count=40):
     print("wrote", outdir)
     return 0
 
+def _run_replay(path):
+    """Play a recorded capture through the full analysis layer, no camera."""
+    app = wx.App(False)
+    v = Viewer()
+    v.replay_path = path
+    v.Show(True)
+    wx.CallAfter(v.on_toggle, None)
+    app.MainLoop()
+
+
 if __name__ == "__main__":
-    if "--selftest" in sys.argv:
+    if "--replay" in sys.argv:
+        i = sys.argv.index("--replay")
+        path = sys.argv[i + 1] if i + 1 < len(sys.argv) else ""
+        _crashlog(_run_replay, path)
+    elif "--selftest" in sys.argv:
         selftest()
     elif "--check-pil" in sys.argv:
         # CI harness: prove the bundled PIL is real. Allocates an image,

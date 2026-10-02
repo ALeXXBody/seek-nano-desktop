@@ -383,5 +383,73 @@ class TestGuiBuildSmoke(unittest.TestCase):
         self.assertIn("gui_smoke.py", yml)
 
 
+class TestRecordReplayCsvAnchors(unittest.TestCase):
+    """Record/replay round trip (via ReplayThread), CSV export, anchors."""
+
+    def _tmp(self):
+        import tempfile
+        self._old = os.getcwd()
+        d = tempfile.mkdtemp()
+        os.chdir(d)
+        return d
+
+    def tearDown(self):
+        if getattr(self, "_old", None):
+            os.chdir(self._old)
+
+    def test_dl_to_c_anchors(self):
+        import numpy as _np
+        self.assertIsNone(viewer.dl_to_c(100, []))
+        self.assertEqual(viewer.dl_to_c(100, [(100, 25.0)]), 25.0)
+        two = viewer.dl_to_c(500, [(0, 20.0), (1000, 30.0)])
+        self.assertAlmostEqual(two, 25.0, places=3)
+        # inverse direction preserved
+        self.assertAlmostEqual(viewer.dl_to_c(250, [(0, 20.0), (1000, 30.0)]),
+                               22.5, places=3)
+
+    def test_anchors_roundtrip(self):
+        self.assertTrue(viewer.anchors_save([(1500.0, 21.5)]))
+        self.assertEqual(viewer.anchors_load(), [(1500.0, 21.5)])
+        os.remove("seeknano_anchors.json")
+
+    def test_replay_thread_feeds_frames(self):
+        import tempfile
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "rec_test.snrec")
+        sys.path.insert(0, os.path.join(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))), "tests"))
+        import stubs as W_
+        with open(path, "wb") as fh:
+            for i in range(6):
+                fh.write(W_.make_frame_body(seq=i + 1))
+        import queue as _q
+        q = _q.Queue()
+        rt = viewer.ReplayThread(q, path)
+        self.assertEqual(len(rt.frames), 6)
+        rt.start()
+        rt.join(timeout=5)
+        got = [item for item in q.queue if item[0] == "frame"]
+        self.assertGreaterEqual(len(got), 6)
+
+    def test_csv_export(self):
+        import numpy as _np
+        import tempfile
+        os.chdir(tempfile.mkdtemp())
+        v = viewer.Viewer.__new__(viewer.Viewer)
+        v._analysis = _np.zeros((3, 4), _np.float32) + 1234.5
+        v._anchors = []
+        v.q = queue.Queue()
+        v.push_status = lambda *_a, **_k: None   # no GUI in this test
+        v._export_csv(None)
+        import glob
+        files = glob.glob("frame_*.csv")
+        self.assertTrue(files, "export produced a file")
+        with open(files[0]) as fh:
+            rows = fh.read().splitlines()
+        self.assertEqual(rows[0], "index,x,y,DL,degC")
+        self.assertEqual(len(rows), 1 + 12)
+        self.assertIn("1234.5", rows[1])
+
+
 if __name__ == "__main__":
     unittest.main()
