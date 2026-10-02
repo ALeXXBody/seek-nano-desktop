@@ -402,12 +402,14 @@ COLORMAPS = [("ironbow", ironbow), ("hot", hot_lut), ("grayscale", gray_lut)]
 # navy-black field, with a HUD cyan for secondary readouts - the same palette
 # the emblem icon uses, so the app reads as one product.
 THEME = {
-    "bg":      (10, 14, 20),      # tile near-black blue
-    "panel":   (16, 22, 30),      # header / log field
-    "text":    (222, 228, 235),   # near-white
-    "muted":   (130, 142, 154),
-    "accent":  (255, 107, 53),    # Seek orange - primary actions
-    "accent2": (38, 198, 218),    # HUD cyan - status / readouts
+    "bg":      (7, 10, 14),       # near-black blue field
+    "panel":   (16, 22, 30),      # title bar / control field
+    "field":   (16, 22, 30),      # glass control fill
+    "line":    (36, 48, 62),      # hairlines / button edges
+    "text":    (235, 240, 246),   # near-white
+    "muted":   (120, 132, 146),   # secondary readouts
+    "accent":  (255, 107, 53),    # Seek orange - primary action
+    "accent2": (56, 222, 246),    # HUD cyan - telemetry
     "ok":      (46, 204, 113),    # connected LED
     "warn":    (255, 193, 7),     # saturated / held
     "err":     (255, 76, 76),     # fault LED
@@ -1110,11 +1112,141 @@ class Stream(threading.Thread):
                     pass
 
 
-class HeaderPanel(wx.Panel):
-    """Futuristic HUD header: emblem LED, app name, live fps readout.
+# ---------------------------------------------------------------------------
+# HUD chrome — all painted, no stock wx chrome anywhere in the shell.
+#   accent #FF6B35 primary action only
+#   hud cyan #38DEF6 telemetry only
+#   field #10161E controls, bg #070A0E, hairline #1E2A36
 
-    Painted, not toolkit widgets: monospace status line on a deep navy field,
-    a cyan LED dot whose colour carries the connection state.
+def _ui_font(size, bold=False, mono=False):
+    """Segoe UI / Consolas with graceful fallback to the stock family."""
+    try:
+        if mono:
+            for name in ("Consolas", "Lucida Console"):
+                f = wx.Font(int(size), wx.FONTFAMILY_TELETYPE,
+                            wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL,
+                            False, name)
+                if f and f.IsOk():
+                    return f
+        else:
+            f = wx.Font(int(size), wx.FONTFAMILY_SWISS, wx.FONTSTYLE_NORMAL,
+                        wx.FONTWEIGHT_BOLD if bold else wx.FONTWEIGHT_NORMAL,
+                        False, "Segoe UI")
+            if f and f.IsOk():
+                return f
+    except Exception:
+        pass
+    try:
+        return wx.Font(int(size),
+                       wx.FONTFAMILY_TELETYPE if mono else wx.FONTFAMILY_DEFAULT,
+                       wx.FONTSTYLE_NORMAL,
+                       wx.FONTWEIGHT_BOLD if bold else wx.FONTWEIGHT_NORMAL)
+    except Exception:
+        return None
+
+
+class GlassButton(wx.Panel):
+    """Flat rounded control, painted. Hover raises fill + text; click fires."""
+
+    def __init__(self, parent, label="", accent=False, small=False,
+                 on_click=None, tooltip=None):
+        wx.Panel.__init__(self, parent)
+        self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
+        self.label = label
+        self.accent = accent
+        self.small = small
+        self._hover = False
+        self._cb = on_click
+        self._fit()
+        if tooltip:
+            self.SetToolTip(tooltip)
+        try:
+            self.SetCursor(wx.Cursor(wx.CURSOR_HAND))
+        except Exception:
+            pass
+        self.Bind(wx.EVT_PAINT, self.on_paint)
+        self.Bind(wx.EVT_ENTER_WINDOW, self._hover_in)
+        self.Bind(wx.EVT_LEAVE_WINDOW, self._hover_out)
+        self.Bind(wx.EVT_LEFT_DOWN, self._press)
+
+    # ---- metrics --------------------------------------------------------
+    def _font(self):
+        return _ui_font(10 if self.small else 12)
+
+    def _fit(self):
+        dc = wx.ClientDC(self)
+        tw = th = 0
+        f = self._font()
+        if f is not None:
+            dc.SetFont(f)
+            tw, th = dc.GetTextExtent(self.label)
+        pad_x, pad_y = (14, 6) if self.small else (20, 10)
+        self.SetMinSize(wx.Size(tw + 2 * pad_x, th + 2 * pad_y))
+        self.SetSize(self.GetMinSize())
+        self.Refresh()
+
+    # ---- API ------------------------------------------------------------
+    def SetLabel(self, text):
+        self.label = text
+        self._fit()
+        self.GetContainingWindow().Layout()
+
+    def GetLabel(self):
+        return self.label
+
+    def Bind(self, ev, fn):
+        """EVT_BUTTON is stored and fired on click; other events pass through."""
+        if ev is wx.EVT_BUTTON:
+            self._cb = fn
+        else:
+            super().Bind(ev, fn)
+
+    # ---- interaction ------------------------------------------------------
+    def _hover_in(self, ev):
+        self._hover = True
+        self.Refresh()
+
+    def _hover_out(self, ev):
+        self._hover = False
+        self.Refresh()
+
+    def _press(self, ev):
+        cb = self._cb
+        self.Refresh()
+        if cb:
+            try:
+                cb(None)          # every handler in this app accepts None
+            except Exception:
+                # handler failures must never take down the frame; the real
+                # diagnostics land in the app log via tick
+                pass
+
+    # ---- paint ------------------------------------------------------------
+    def on_paint(self, ev):
+        w, h = self.GetClientSize()
+        dc = wx.AutoBufferedPaintDC(self)
+        if self.accent:
+            fill = (255, 107, 53) if not self._hover else (255, 138, 90)
+            text = (18, 24, 32)
+        else:
+            fill = (16, 22, 30) if not self._hover else (28, 39, 53)
+            text = (222, 228, 235) if not self._hover else (140, 224, 246)
+        dc.SetPen(wx.Pen(wx.Colour(30, 42, 54)))
+        dc.SetBrush(wx.Brush(wx.Colour(*fill)))
+        dc.DrawRoundedRectangle(0, 0, w, h, 6 if self.small else 9)
+        f = self._font()
+        if f is not None:
+            dc.SetFont(f)
+        dc.SetTextForeground(wx.Colour(*text))
+        tw, th = dc.GetTextExtent(self.label)
+        dc.DrawText(self.label, (w - tw) // 2, (h - th) // 2)
+
+
+class TitleBar(wx.Panel):
+    """The window's own title bar: emblem + title + LED + telemetry + buttons.
+
+    Painted; dragging anywhere outside the two circles moves the frameless
+    window. set_state() keeps the HeaderPanel API so push_status works.
     """
 
     def __init__(self, parent, theme):
@@ -1124,49 +1256,154 @@ class HeaderPanel(wx.Panel):
         self.led_col = self.t["muted"]
         self.fps_text = ""
         self.info_text = ""
+        self._emblem = None
+        try:
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "assets", "icon_256.png")
+            if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+                path = os.path.join(sys._MEIPASS, "assets", "icon_256.png")
+            img = wx.Image(path, wx.BITMAP_TYPE_PNG)
+            if img.IsOk():
+                img.Rescale(22, 22, wx.IMAGE_QUALITY_BILINEAR)
+                self._emblem = img.ConvertToBitmap()
+        except Exception:
+            self._emblem = None
         self.Bind(wx.EVT_PAINT, self.on_paint)
+        self.Bind(wx.EVT_LEFT_DOWN, self.on_down)
+        self.Bind(wx.EVT_MOTION, self.on_move)
+        self.Bind(wx.EVT_LEFT_UP, self.on_up)
+        self.Bind(wx.EVT_CAPTURE_LOST, lambda ev: setattr(self, "_drag_from", None))
 
+    # ---- geometry --------------------------------------------------------
+    def _btn_rects(self):
+        w, h = self.GetClientSize()
+        y = h // 2 - 8
+        return (wx.Rect(w - 74, y, 16, 16),   # close
+                wx.Rect(w - 36, y, 16, 16))   # minimize
+
+    # ---- drag ------------------------------------------------------------
+    def on_down(self, ev):
+        close, mini = self._btn_rects()
+        p = ev.GetPosition()
+        if close.Contains(p):
+            self._act("close")
+            return
+        if mini.Contains(p):
+            self._act("min")
+            return
+        self._drag_from = self.ClientToScreen(p)
+        self._drag_win = self.GetParent().GetPosition()
+        self.CaptureMouse()
+
+    def on_move(self, ev):
+        if getattr(self, "_drag_from", None) is None or not self.HasCapture():
+            if getattr(self, "_drag_from", None) is None:
+                # no capture in progress -> hover tracking for the buttons
+                self._hover_pos = ev.GetPosition()
+                self.Refresh()
+            return
+        p = self.ClientToScreen(ev.GetPosition())
+        dx = p.x - self._drag_from.x
+        dy = p.y - self._drag_from.y
+        win = self.GetParent()
+        win.Move(win.GetPosition().x + dx, win.GetPosition().y + dy)
+        self._drag_from = p
+
+    def on_up(self, ev):
+        try:
+            if self.HasCapture():
+                self.ReleaseMouse()
+        except Exception:
+            pass
+        self._drag_from = None
+
+    def _act(self, what):
+        win = wx.GetTopLevelParent(self)
+        if what == "close":
+            win.Close()
+        elif what == "min":
+            win.Iconize(True)
+
+    # ---- state -----------------------------------------------------------
     def set_state(self, text, colour, fps="", info=""):
         self.led_text, self.led_col = text, colour
         self.fps_text, self.info_text = fps, info
         self.Refresh()
 
+    # ---- paint -----------------------------------------------------------
     def on_paint(self, ev):
         w, h = self.GetClientSize()
         dc = wx.AutoBufferedPaintDC(self)
-        col = self.t["panel"]
-        dc.SetBackground(wx.Brush(wx.Colour(*col)))
+        dc.SetBackground(wx.Brush(wx.Colour(*self.t["panel"])))
         dc.Clear()
-        # LED
-        x0, y0 = 18, h / 2.0
+        x = 14
+        if self._emblem is not None:
+            dc.DrawBitmap(self._emblem, x, (h - 22) // 2, True)
+            x += 30
+        f = _ui_font(12, bold=True)
+        if f is not None:
+            dc.SetFont(f)
+        dc.SetTextForeground(wx.Colour(*self.t["text"]))
+        tw, th = dc.GetTextExtent("SEEK NANO")
+        dc.DrawText("SEEK NANO", x, (h - th) // 2)
+        x += tw + 24
+        # LED + state, immediately after the title
         dc.SetBrush(wx.Brush(wx.Colour(*self.led_col)))
         dc.SetPen(wx.Pen(wx.Colour(*self.led_col)))
-        dc.DrawCircle(x0, y0, 7)
-        # LED state text
-        dc.SetTextForeground(wx.Colour(*self.t["text"]))
-        dc.SetFont(self._font(11, True))
-        dc.DrawText(self.led_text, x0 + 16, y0 - 20)
-        # dpi readout (muted, right side)
+        dc.DrawCircle(x, h // 2, 5)
+        f2 = _ui_font(10)
+        if f2 is not None:
+            dc.SetFont(f2)
+        dc.SetTextForeground(wx.Colour(*self.t["muted"]))
+        sw, sh = dc.GetTextExtent(self.led_text)
+        dc.DrawText(self.led_text, x + 10, (h - sh) // 2)
+        # telemetry (cyan), right-aligned with a margin for the window buttons
         if self.fps_text:
-            dc.SetFont(self._font(10))
+            f3 = _ui_font(10, mono=True)
+            if f3 is not None:
+                dc.SetFont(f3)
             dc.SetTextForeground(wx.Colour(*self.t["accent2"]))
-            fw, _fh = dc.GetTextExtent(self.fps_text)
-            dc.DrawText(self.fps_text, w - fw - 18, y0 - 20)
-        if self.info_text:
-            dc.SetFont(self._font(9))
-            dc.SetTextForeground(wx.Colour(*self.t["muted"]))
-            iw, _ih = dc.GetTextExtent(self.info_text)
-            dc.DrawText(self.info_text, w - iw - 18, y0 + 6)
+            fw, fh = dc.GetTextExtent(self.fps_text)
+            dc.DrawText(self.fps_text, w - fw - 96, (h - fh) // 2)
+        # hairline border
+        dc.SetPen(wx.Pen(wx.Colour(*self.t["line"])))
+        dc.DrawLine(0, h - 1, w, h - 1)
+        # window buttons: small circles with hover
+        close, mini = self._btn_rects()
+        hover_pos = getattr(self, "_hover_pos", None)
+        for rect, glyph, col in ((close, "\u2715", self.t["err"]),
+                                 (mini, "\u2014", self.t["muted"])):
+            r = rect.x + 8
+            hot = (hover_pos is not None and rect.Contains(hover_pos))
+            dc.SetBrush(wx.Brush(wx.Colour(
+                *(([60, 40, 44] if hot and glyph == "\u2715" else
+                   (44, 58, 72) if hot else self.t["field"])))))
+            dc.SetPen(wx.Pen(wx.Colour(*self.t["line"])))
+            dc.DrawCircle(r, rect.y + 8, 8)
+            f4 = _ui_font(9)
+            if f4 is not None:
+                dc.SetFont(f4)
+            dc.SetTextForeground(wx.Colour(*col))
+            gw, gh = dc.GetTextExtent(glyph)
+            dc.DrawText(glyph, r - gw // 2, rect.y + 8 - gh // 2)
 
-    def _font(self, size, bold=False):
-        f = wx.Font(int(size), wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL,
-                    wx.FONTWEIGHT_BOLD if bold else wx.FONTWEIGHT_NORMAL)
-        return f
+    def _track_hover(self, ev=None):
+        """EVT_MOTION without capture: store the position so the window
+        buttons can raise their hover state."""
+        self._hover_pos = ev.GetPosition()
+        self.Refresh()
 
+    def __init_hooks(self):
+        pass
 
 class Viewer(wx.Frame):
     def __init__(self):
-        wx.Frame.__init__(self, None, title="Seek Nano Viewer", size=(1000, 660))
+        # no wx.CAPTION: the painted TitleBar is the frame; taskbar + resize kept
+        wx.Frame.__init__(self, None, title="Seek Nano Viewer",
+                          size=(1000, 660),
+                          style=wx.MINIMIZE_BOX | wx.MAXIMIZE_BOX | 
+                          wx.RESIZE_BORDER | wx.CLOSE_BOX | 
+                          wx.CLIP_CHILDREN)
         self.q = queue.Queue()
         self.stream_thread = None
         self.frame_raw = None
@@ -1207,7 +1444,7 @@ class Viewer(wx.Frame):
         self.prev_t = None        # previous displayed frame, for the blend
         self.stretch_skips = 0    # frames whose stretch window was rejected
 
-        # ---- window chrome: dark futuristic theme ------------------------
+        # ---- window chrome: frameless HUD shell ---------------------------
         self.SetBackgroundColour(wx.Colour(*THEME["bg"]))
         self.SetForegroundColour(wx.Colour(*THEME["text"]))
 
@@ -1215,107 +1452,69 @@ class Viewer(wx.Frame):
         panel.SetBackgroundColour(wx.Colour(*THEME["bg"]))
         panel.SetForegroundColour(wx.Colour(*THEME["text"]))
 
-        # HUD header: LED + app name + fps readout, painted (no widgets)
-        self.header = HeaderPanel(panel, THEME)
+        # HUD title bar: emblem, letterspaced title, LED + state, telemetry
+        self.header = TitleBar(panel, THEME)
+        self.header.SetMinSize((-1, 46))
+
+        # ---- command deck ---------------------------------------------------
+        self.start_btn = GlassButton(panel, label="Start stream",
+                                     accent=True, on_click=self.on_toggle,
+                                     tooltip="start / stop (key: s)")
+        self.cmap_btn = GlassButton(panel, label="colormap: ironbow",
+                                    on_click=self.on_cmap,
+                                    tooltip="cycle colormap (key: c)")
+        self.flat_btn = GlassButton(panel, label="Capture flat (wall)",
+                                    on_click=self.on_capture_flat,
+                                    tooltip="capture a wall reference (key: f)")
+        flat_clear = GlassButton(panel, label="Clear flat",
+                                 on_click=self.on_clear_flat)
+        snap_btn = GlassButton(panel, label="Save PNG",
+                               on_click=self.on_snapshot, tooltip="key: p")
+        raw_btn = GlassButton(panel, label="Dump raw",
+                              on_click=self.on_raw, tooltip="key: d")
 
         top = wx.BoxSizer(wx.HORIZONTAL)
+        top.Add(self.start_btn, 0, wx.LEFT|wx.RIGHT, 10)
+        top.Add(self.cmap_btn, 0, wx.LEFT, 14)
+        top.Add(self.flat_btn, 0, wx.LEFT, 8)
+        top.Add(flat_clear, 0, wx.LEFT, 8)
+        top.Add(snap_btn, 0, wx.LEFT, 8)
+        top.Add(raw_btn, 0, wx.LEFT, 8)
+        top.Add((20, 1), 1, wx.EXPAND)
 
-        self.start_btn = wx.Button(panel, label="Start stream")
-        self.start_btn.Bind(wx.EVT_BUTTON, self.on_toggle)
-        self.cmap_btn = wx.Button(panel, label="colormap: ironbow")
-        self.cmap_btn.Bind(wx.EVT_BUTTON, self.on_cmap)
-        self.flat_btn = wx.Button(panel, label="Capture flat (wall)")
-        self.flat_btn.Bind(wx.EVT_BUTTON, self.on_capture_flat)
-        flat_clear = wx.Button(panel, label="Clear flat")
-        flat_clear.Bind(wx.EVT_BUTTON, self.on_clear_flat)
-        snap_btn = wx.Button(panel, label="Save PNG")
-        snap_btn.Bind(wx.EVT_BUTTON, self.on_snapshot)
-        raw_btn = wx.Button(panel, label="Dump raw frame")
-        raw_btn.Bind(wx.EVT_BUTTON, self.on_raw)
-        copy_btn = wx.Button(panel, label="Copy log")
-        copy_btn.Bind(wx.EVT_BUTTON, self.on_copy)
-        clear_btn = wx.Button(panel, label="Clear log")
-        clear_btn.Bind(wx.EVT_BUTTON, self.on_clear)
-
-        def cool(b, fg=None, bg=None, bold=False, big=False):
-            """Theme a button. The stock wimp-grey read out of place."""
-            b.SetBackgroundColour(wx.Colour(*(bg or THEME["panel"])))
-            b.SetForegroundColour(wx.Colour(*(fg or THEME["text"])))
-            f = b.GetFont()
-            if big:
-                f = wx.Font(15, f.GetFamily() if hasattr(f, "GetFamily")
-                            else wx.FONTFAMILY_DEFAULT,
-                            wx.FONTSTYLE_NORMAL,
-                            wx.FONTWEIGHT_BOLD if bold else wx.FONTWEIGHT_NORMAL)
-                b.SetFont(f)
-            elif bold:
-                b.SetFont(b.GetFont().Bold())
-            try:
-                b.SetOwnBackgroundColour(b.GetBackgroundColour())
-                b.SetOwnForegroundColour(b.GetForegroundColour())
-            except AttributeError:
-                # per-window ownership setters are optional in some wx builds;
-                # the frame-level colours above still theme the button
-                pass
-
-        cool(self.start_btn, fg=THEME["bg"], bg=THEME["accent"], big=True)
-        cool(self.cmap_btn)
-        cool(self.flat_btn)
-        cool(flat_clear)
-        cool(snap_btn)
-        cool(raw_btn)
-        cool(copy_btn)
-        cool(clear_btn)
-        for b in (self.start_btn, self.cmap_btn, self.flat_btn, flat_clear,
-                    snap_btn, raw_btn, copy_btn, clear_btn):
-            top.Add(b, 0, wx.ALL, 4)
-
-        # --------------------------------------------------------------------
-        # --- Hot-spot detection row ------------------------------------------
-        # Its own row rather than more buttons on the one above. The main row
-        # was already wider than the window: the dev-host textbox at the end of
-        # it was cut off to just "19" once two more buttons were added, so the
-        # controls a user needs were being clipped off-screen to make room for
-        # new ones. A second row costs 30 px of height and clips nothing.
-        self.spot_btn = wx.Button(panel, label="hot spots: off")
-        self.spot_btn.Bind(wx.EVT_BUTTON, self.on_spot_mode)
-        spot_sens = wx.Button(panel, label="sens 1.00")
-        spot_sens.Bind(wx.EVT_BUTTON, self.on_spot_sens)
-        self.spot_sens_btn = spot_sens
-        cool(self.spot_btn)
-        cool(spot_sens)
+        # ---- hot-spot row ----------------------------------------------------
+        self.spot_btn = GlassButton(panel, label="hot spots: off",
+                                    small=True, on_click=self.on_spot_mode)
+        self.spot_sens_btn = GlassButton(panel, label="sens 1.00",
+                                         small=True, on_click=self.on_spot_sens)
         hot = wx.BoxSizer(wx.HORIZONTAL)
-        for b in (self.spot_btn, self.spot_sens_btn):
-            hot.Add(b, 0, wx.ALL, 4)
+        hot.Add((10, 1), 0)
+        hot.Add(self.spot_btn, 0, wx.LEFT, 0)
+        hot.Add(self.spot_sens_btn, 0, wx.LEFT, 8)
         hot.Add((20, 1), 1, wx.EXPAND)
         self.hot_sizer = hot
-        # --------------------------------------------------------------------
 
-        # --------------------------------------------------------------------
-        # --- DEV row: frame upload to a dev host + endpoint / bind probes --
-        # Internal to the development flow, kept but HIDDEN. Toggle with
-        # Ctrl+Alt+D; the stable build never shows it.
+        # ---- DEV row: built but HIDDEN. Ctrl+Alt+D reveals it --------------
         self.dev_host = wx.TextCtrl(panel, value="192.168.50.200:8100",
                                     style=wx.TE_PROCESS_ENTER)
         self.dev_upload = wx.CheckBox(panel, label="dev: upload frames")
-        self.dev_probe = wx.Button(panel, label="dev: retry endpoints")
-        self.dev_bind = wx.Button(panel, label="dev: bind info")
+        self.dev_probe = GlassButton(panel, label="dev: retry endpoints",
+                                     small=True, on_click=self.on_dev_probe)
+        self.dev_bind = GlassButton(panel, label="dev: bind info",
+                                    small=True, on_click=self.on_dev_bind)
         self.dev_upload.SetValue(False)
-        self.dev_probe.Bind(wx.EVT_BUTTON, self.on_dev_probe)
-        self.dev_bind.Bind(wx.EVT_BUTTON, self.on_dev_bind)
-        cool(self.dev_probe)
-        cool(self.dev_bind)
         self.dev_host.SetBackgroundColour(wx.Colour(*THEME["panel"]))
         self.dev_host.SetForegroundColour(wx.Colour(*THEME["accent2"]))
         self.dev_upload.SetBackgroundColour(wx.Colour(*THEME["bg"]))
         self.dev_upload.SetForegroundColour(wx.Colour(*THEME["muted"]))
         devbox = wx.BoxSizer(wx.HORIZONTAL)
-        for b in (self.dev_host, self.dev_upload, self.dev_probe, self.dev_bind):
-            devbox.Add(b, 0, wx.ALL, 4)
+        devbox.Add((10, 1), 0)
+        devbox.Add(self.dev_host, 1, wx.ALIGN_CENTER_VERTICAL)
+        devbox.Add(self.dev_upload, 0, wx.LEFT, 8)
+        devbox.Add(self.dev_probe, 0, wx.LEFT, 8)
+        devbox.Add(self.dev_bind, 0, wx.LEFT, 8)
         devbox.Add((20, 1), 1, wx.EXPAND)
         self.dev_sizer = devbox
-        # --------------------------------------------------------------------
-
         split = wx.SplitterWindow(panel, style=wx.SP_LIVE_UPDATE)
         self.video = wx.Panel(split, style=wx.BORDER_SUNKEN)
         # Tell wx "I paint every pixel of this myself". Without it, wxWindows
@@ -1350,6 +1549,8 @@ class Viewer(wx.Frame):
         # is never laid out still reports a plausible size.
         sizer.Add(hot, 0, wx.EXPAND)
         sizer.Add(devbox, 0, wx.EXPAND)
+        # dev row is built but invisible in the shipped viewer; Ctrl+Alt+D
+        devbox.ShowItems(False)
         sizer.Add(split, 1, wx.EXPAND)
         panel.SetSizer(sizer)
         split.SplitVertically(self.video, self.log, 420)
@@ -1358,9 +1559,7 @@ class Viewer(wx.Frame):
         split.Unsplit(self.log)
         self.split = split
 
-        self.SetStatusBar(wx.StatusBar(self))
-        self.GetStatusBar().SetBackgroundColour(wx.Colour(*THEME["bg"]))
-        self.GetStatusBar().SetForegroundColour(wx.Colour(*THEME["muted"]))
+        # no status bar - the HUD title bar carries the state text
 
         # emblem icon in the window + taskbar (assets/ is wired into the exe)
         _icon = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -1438,7 +1637,9 @@ class Viewer(wx.Frame):
         ev.Skip()
 
     def push_status(self, text):
-        self.GetStatusBar().SetStatusText(text)
+        sb = self.GetStatusBar()
+        if sb is not None:
+            sb.SetStatusText(text)
         # HUD header carries the same state, colour-mapped
         low = text.lower()
         if "error" in low or "fault" in low or "unavail" in low:
@@ -1789,6 +1990,19 @@ class Viewer(wx.Frame):
             dc.SetBackground(wx.BLACK_BRUSH)
             dc.Clear()
             dc.DrawBitmap(bmp, 0, 0)
+            # HUD frame overlay: hairline inset + corner ticks, drawn only
+            # when a real frame is on screen (never over the blank startup)
+            cw, ch = self.video.GetClientSize()
+            dc.SetPen(wx.Pen(wx.Colour(46, 62, 78)))
+            dc.DrawRectangle(0, 0, cw, ch)
+            oc = wx.Colour(*THEME["accent"])
+            dc.SetPen(wx.Pen(oc))
+            for (cx, cy, dx, dy) in ((0, 0, 18, 0), (0, 0, 0, 18),
+                                     (cw - 1, 0, -18, 0), (cw - 1, 0, 0, 18),
+                                     (0, ch - 1, 18, 0), (0, ch - 1, 0, -18),
+                                     (cw - 1, ch - 1, -18, 0),
+                                     (cw - 1, ch - 1, 0, -18)):
+                dc.DrawLine(cx, cy, cx + dx, cy + dy)
         except Exception:
             self._show_fatal("draw", sys.exc_info())
 

@@ -1,9 +1,8 @@
 """CI smoke: build the real GUI once on the runner's real wxPython.
 
 Catches toolkit-API drift (e.g. the 'Button' object has no attribute
-'SetOwnBackColor' crash that shipped in v0.6.0-hud: tests never built the
-GUI class, only imported the module). Constructed headless - the window is
-never shown - and any exception fails the build with a traceback.
+'SetOwnBackColor' crash). Constructed headless - the window is never shown
+- and any exception fails the build with a traceback.
 """
 import os
 import sys
@@ -16,12 +15,20 @@ sys.path.insert(0, APP)
 app = wx.App(False)          # offscreen; no window is shown
 import viewer
 
-v = viewer.Viewer()          # full __init__: theme, header, sizers, icon
-v.push_status("connected - protocol handshake ok")
-v.header.set_state("connected", wx.Colour(0, 255, 0), fps="frame 39 ms")
-v._tick(None)                # one drain of an empty event queue
+v = viewer.Viewer()          # full __init__: glass buttons, title bar, icon
 
-import wx.lib.sized_controls as sc					 # noqa: F401 (import sanity)
+# exercise every painted control so API drift shows here, not to a user
+v.start_btn.SetLabel("Stop stream")
+v.start_btn.SetLabel("Start stream")
+v.cmap_btn.SetLabel("colormap: grayscale")
+v.spot_btn.SetLabel("hot spots: mark")
+v.header.set_state("connected - protocol handshake ok",
+                   wx.Colour(46, 204, 113), fps="frame 39 ms")
+v.push_status("streaming mode enabled - pumping frames")
+v.header.Refresh()
+v.Update()                   # run one paint pass synchronously
+v._tick(None)                # drain an empty event queue
+
 wx.CallAfter(v.Close)
 app.MainLoop()
-print("gui smoke: Viewer() built, status painted, tick drained - ok")
+print("gui smoke: glass buttons relabelled, title bar painted, tick drained - ok")
