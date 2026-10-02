@@ -51,6 +51,20 @@ IW, IH = 320, 240
 FAIL = []
 
 
+def _clean_dumps():
+    """Leftover dumps from a previous run make the 'saved nothing' checks fail,
+    so the suite would depend on being run first."""
+    for f in os.listdir("."):
+        if f.startswith("scanline_fault_"):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+
+
+_clean_dumps()
+
+
 def check(cond, msg):
     print(("   ok   " if cond else "   FAIL ") + msg)
     if not cond:

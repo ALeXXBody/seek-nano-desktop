@@ -3064,6 +3064,13 @@ class Viewer(wx.Frame):
         img = _roi_u16(disp)
         self._validate_ffc(img)
         img = self._process(img)
+        if img is None:
+            # Rejected frame (mid-frame gain change - see _scanline_health).
+            # Everything below assumes a real array: the percentiles, the
+            # stretch, the colormap. Without this the paint raised
+            # TypeError inside np.percentile and the window stopped updating
+            # entirely, which is worse than the artifact it fixed.
+            return None
         self._analysis = img   # corrected device units: cursor stats/profile/iso read from here
         # Display stretch. Recomputing the 2/98 percentiles every frame was the
         # remaining source of flicker: the window is 869 frames shown, 0
