@@ -1189,7 +1189,10 @@ class GlassButton(wx.Panel):
     def SetLabel(self, text):
         self.label = text
         self._fit()
-        self.GetContainingWindow().Layout()
+        # relayout: the label width may have changed -> re-fit the row
+        win = self.GetParent()
+        if win is not None:
+            win.Layout()
 
     def GetLabel(self):
         return self.label
