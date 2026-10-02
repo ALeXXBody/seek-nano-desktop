@@ -1272,7 +1272,11 @@ class TitleBar(wx.Panel):
         self.Bind(wx.EVT_LEFT_DOWN, self.on_down)
         self.Bind(wx.EVT_MOTION, self.on_move)
         self.Bind(wx.EVT_LEFT_UP, self.on_up)
-        self.Bind(wx.EVT_CAPTURE_LOST, lambda ev: setattr(self, "_drag_from", None))
+        _cap_lost = getattr(wx, "EVT_MOUSE_CAPTURE_LOST",
+                            getattr(wx, "EVT_CAPTURE_LOST", None))
+        if _cap_lost is not None:
+            self.Bind(_cap_lost,
+                      lambda ev: setattr(self, "_drag_from", None))
 
     # ---- geometry --------------------------------------------------------
     def _btn_rects(self):
