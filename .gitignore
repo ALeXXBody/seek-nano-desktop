@@ -28,3 +28,10 @@ nuc_out/
 .pytest_cache/
 *.png
 *.snrec
+
+# Written by the scanline watchdog when it rejects a mid-frame-gain-change
+# frame, and by the hardware suites' reference captures. Test output, and the
+# watchdog dumps are large - one is 485 KB per fault.
+scanline_fault_*.raw
+out/
+dump/

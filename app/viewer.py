@@ -501,6 +501,19 @@ HOTSPOT_MODES = ("off", "mark", "outline", "track", "alarm")
 HOTSPOT_SENS = 1.0        # scales how far above the scene a region must sit
 HOTSPOT_MAX = 5           # how many to report at once
 SPOT_STABLE = 3           # frames of evidence before a region is drawn
+
+# A USB stall is transient. Reconnecting a bounded number of times rides out a
+# momentary dropout; the camera itself occasionally wedges and only a physical
+# unplug/replug clears that, so the retries are capped and then say so.
+USB_RETRY_MAX = 6
+USB_RETRY_DELAY = 3.0
+
+
+def _is_usb_timeout(payload):
+    t = str(payload)
+    return ("USBTimeoutError" in t or "Operation timed out" in t
+            or "Errno 10060" in t or "Errno 110" in t
+            or "Pipe error" in t)
 SPOT_MOVE = 24            # px a region may drift and keep its stability score
 # A row whose within-row variation exceeds the frame's own robust spread by
 # this factor is treated as a corrupted scanline and the frame is kept.
@@ -2779,6 +2792,13 @@ class Viewer(wx.Frame):
                     out[y0:y1 + 1, x0:x1 + 1] = c
         return out
 
+    def _usb_reconnect(self):
+        """Restart the stream after a USB stall."""
+        self._usb_retries = getattr(self, "_usb_retries", 0)
+        if self.stream_thread is not None:
+            return
+        self.on_toggle(None)
+
     def on_spot_mode(self, ev=None):
         """Cycle off -> mark -> outline -> track -> alarm."""
         try:
@@ -3461,6 +3481,29 @@ class Viewer(wx.Frame):
                 self.push_status(payload)
             elif kind == "error":
                 self.log.AppendText("ERROR: %s\n" % payload)
+                # A USB timeout is transient, not fatal. Treating it as fatal
+                # stops the stream and leaves the window showing a frozen last
+                # frame under an ERROR banner, which reads as a crash and needs
+                # the user to press Start again. Retry a bounded number of times
+                # with a pause, so a momentary stall is ridden out instead of
+                # ending the session.
+                if _is_usb_timeout(payload):
+                    n = getattr(self, "_usb_retries", 0) + 1
+                    self._usb_retries = n
+                    if n <= USB_RETRY_MAX:
+                        self.push_status("USB timeout - reconnecting (%d/%d)"
+                                         % (n, USB_RETRY_MAX))
+                        _vlog("LOG", "USB timeout, reconnect %d/%d in %.1fs"
+                              % (n, USB_RETRY_MAX, USB_RETRY_DELAY))
+                        self.stream_thread = None
+                        self.start_btn.SetLabel("Reconnecting...")
+                        wx.CallLater(USB_RETRY_DELAY * 1000,
+                                     self._usb_reconnect)
+                        return
+                    self.push_status(
+                        "USB timed out %d times - unplug the Nano and replug it."
+                        % USB_RETRY_MAX)
+                self._usb_retries = 0
                 self.push_status("ERROR: " + payload[:80])
                 self.stream_thread = None
                 self.start_btn.SetLabel("Start stream")
