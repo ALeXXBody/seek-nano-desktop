@@ -1349,16 +1349,75 @@ def _ui_font(size, bold=False, mono=False):
         return None
 
 
+def _icon_glyph(dc, key, cx, cy, s, col):
+    """Draw a rail icon from primitives. No text, so no ClearType fringe.
+
+    The rail buttons used to carry word labels, which on this dark panel picked
+    up ClearType's per-subpixel colouring - every glyph fringed red/blue/cyan.
+    Icons sidestep that entirely and take far less width, which is what lets the
+    image run full-bleed.
+    """
+    pen = wx.Pen(wx.Colour(*col), 1)
+    dc.SetPen(pen)
+    dc.SetBrush(wx.TRANSPARENT_BRUSH)
+    h = s // 2
+
+    if key == "play":
+        dc.SetBrush(wx.Brush(wx.Colour(*col)))
+        dc.DrawPolygon([(cx - h // 2, cy - h // 2), (cx - h // 2, cy + h // 2),
+                        (cx + h // 2, cy)])
+    elif key == "stop":
+        dc.SetBrush(wx.Brush(wx.Colour(*col)))
+        dc.DrawRectangle(cx - h // 2, cy - h // 2, h, h)
+    elif key == "cmap":
+        for i, t in enumerate((0.25, 0.5, 0.75)):
+            r = int(235 * t) + 20
+            dc.SetPen(wx.Pen(wx.Colour(r, int(140 * (1 - t)), int(200 * t)), 2))
+            y = cy - h // 2 + int(i * h / 2.0)
+            dc.DrawLine(cx - h // 2, y, cx + h // 2, y)
+    elif key == "flat":
+        dc.DrawRectangle(cx - h // 2, cy - h // 2, h, h)
+        dc.DrawLine(cx - h // 2, cy, cx + h // 2, cy)
+    elif key == "clear":
+        dc.DrawLine(cx - h // 2, cy - h // 2, cx + h // 2, cy + h // 2)
+        dc.DrawLine(cx - h // 2, cy + h // 2, cx + h // 2, cy - h // 2)
+    elif key == "png":
+        dc.DrawRectangle(cx - h // 2, cy - h // 2, h, h)
+        dc.DrawLine(cx - h // 2, cy + h // 4, cx + h // 2, cy + h // 4)
+        dc.DrawLine(cx, cy + h // 4, cx, cy - h // 4)
+    elif key == "raw":
+        dc.DrawLine(cx, cy - h // 2, cx, cy + h // 4)
+        dc.DrawLine(cx - h // 4, cy, cx, cy + h // 4)
+        dc.DrawLine(cx + h // 4, cy, cx, cy + h // 4)
+        dc.DrawLine(cx - h // 2, cy + h // 2 - 1, cx + h // 2, cy + h // 2 - 1)
+    elif key == "spot":
+        dc.DrawCircle(cx, cy, h // 3)
+        dc.DrawLine(cx - h // 2, cy, cx - h // 3, cy)
+        dc.DrawLine(cx + h // 3, cy, cx + h // 2, cy)
+        dc.DrawLine(cx, cy - h // 2, cx, cy - h // 3)
+        dc.DrawLine(cx, cy + h // 3, cx, cy + h // 2)
+    elif key == "sens":
+        dc.DrawLine(cx - h // 2, cy, cx + h // 2, cy)
+        dc.DrawLine(cx, cy - h // 2, cx, cy + h // 2)
+        dc.DrawCircle(cx, cy, 1)
+
+
 class GlassButton(wx.Panel):
-    """Flat rounded control, painted. Hover raises fill + text; click fires."""
+    """Flat control, painted. Hover raises fill + text; click fires.
+
+    `icon` switches it to a square glyph button with no text at all - the rail
+    form. State that used to be spelled out in the label is carried by the
+    glyph instead (play/stop, filled/outline), and the tooltip carries the rest.
+    """
 
     def __init__(self, parent, label="", accent=False, small=False,
-                 on_click=None, tooltip=None):
+                 on_click=None, tooltip=None, icon=None):
         wx.Panel.__init__(self, parent)
         self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
         self.label = label
         self.accent = accent
         self.small = small
+        self.icon = icon
         self._hover = False
         self._cb = on_click
         self._fit()
@@ -1378,6 +1437,11 @@ class GlassButton(wx.Panel):
         return _ui_font(10 if self.small else 12)
 
     def _fit(self):
+        if self.icon:
+            self.SetMinSize(wx.Size(40, 40))
+            self.SetSize(self.GetMinSize())
+            self.Refresh()
+            return
         dc = wx.ClientDC(self)
         tw = th = 0
         f = self._font()
@@ -1392,6 +1456,13 @@ class GlassButton(wx.Panel):
     # ---- API ------------------------------------------------------------
     def SetLabel(self, text):
         self.label = text
+        if self.icon:
+            # An icon button has no label to fit, and relaying out the rail on
+            # every state change (the start button relabels each time the
+            # stream toggles) would churn the layout for nothing. The glyph
+            # already shows play vs stop.
+            self.Refresh()
+            return
         self._fit()
         # relayout: the label width may have changed -> re-fit the row
         win = self.GetParent()
@@ -1438,6 +1509,24 @@ class GlassButton(wx.Panel):
         else:
             fill = (16, 22, 30) if not self._hover else (28, 39, 53)
             text = (222, 228, 235) if not self._hover else (140, 224, 246)
+        if self.icon:
+            # rail form: a square tile with corner brackets and a glyph, no text
+            dc.SetPen(wx.Pen(wx.Colour(36, 48, 62)))
+            dc.SetBrush(wx.Brush(wx.Colour(*fill)))
+            dc.DrawRoundedRectangle(0, 0, w, h, 6)
+            if self._hover:
+                dc.SetPen(wx.Pen(wx.Colour(56, 222, 246)))
+                dc.SetBrush(wx.TRANSPARENT_BRUSH)
+                dc.DrawRoundedRectangle(1, 1, w - 3, h - 3, 5)
+            g = self.icon
+            if self.accent:
+                g = "stop" if g == "play" else g
+            # The glyph spans the tile minus a small pad. Sizing it off
+            # min(w, h) - 18 left only ~22 px inside a 40 px tile, which
+            # clipped the colormap bars and the crosshair.
+            _icon_glyph(dc, g, w // 2, h // 2,
+                        int(min(w, h) * 0.55), text)
+            return
         dc.SetPen(wx.Pen(wx.Colour(30, 42, 54)))
         dc.SetBrush(wx.Brush(wx.Colour(*fill)))
         dc.DrawRoundedRectangle(0, 0, w, h, 6 if self.small else 9)
@@ -1655,17 +1744,24 @@ class TelemetryBlock(wx.Panel):
             dc.SetFont(f)
         dc.SetTextForeground(wx.Colour(*self.head_col))
         text = self.headline.upper()
-        # shrink to what the rail width can hold; break with an ellipsis
-        fits = max(10, int(w - 32) // (6 * 2))
+        # shrink to what the strip can hold beside the right-aligned readouts
+        fits = max(10, int((w - 300) // 12))
         if len(text) > fits:
             text = text[:fits - 1] + "\u2026"
         cx = 16
         fsp = 1.5
-        for ch in text[:34]:
-            dc.DrawText(ch, int(cx), 12)
+        _th = dc.GetTextExtent(text[:1])[1]
+        y = (h - _th) // 2 + 1
+        for ch in text[:40]:
+            dc.DrawText(ch, int(cx), y)
             cw = dc.GetTextExtent(ch)[0]
             cx += cw + fsp
-        # mono readouts
+        # One line, right-aligned: headline on the left, readouts on the right.
+        # This block used to stack the headline at y=12, a mono line at y=52 and
+        # the anchored-°C note at y=68 - about 80 px, which is what the 108 px
+        # rail column needed. As a top HUD strip it has to be one line tall, and
+        # the same readouts are already in the title bar, so they move to the
+        # right of the same row rather than a second one.
         f2 = _ui_font(9, mono=True)
         if f2 is not None:
             dc.SetFont(f2)
@@ -1677,15 +1773,17 @@ class TelemetryBlock(wx.Panel):
             comp.append("GAIN %s" % self.gain)
         if self.seq:
             comp.append("SEQ %s" % self.seq)
-        line = "   ".join(comp) if comp else ""
-        if line:
-            dc.DrawText(line, 16, 52)
+        line = "   ".join(comp)
+        anchored = "anchored \u00b0C" if getattr(self, "state_anchored",
+                                                 False) else "DL only"
+        if line or anchored:
+            tail = (anchored + "   " + line) if line else anchored
+            dc.SetTextForeground(wx.Colour(*self.t["muted"]))
+            tw, th = dc.GetTextExtent(tail)
+            dc.DrawText(tail, max(cx + 18, w - tw - 16),
+                         (h - th) // 2 + 2)
         # the anchored-°C state, so its absence is explicable on screen
-        if getattr(self, "state_anchored", None):
-            dc.DrawText("anchored \u00b0C (t re-sets)", 16, 68)
-        else:
-            dc.DrawText("DL only - hover + t to anchor \u00b0C", 16, 68)
-        # the ironbow identity bar across the bottom
+        # the ironbow identity bar, hairline under the strip
         bar_w = max(1, w - 32)
         for i in range(bar_w):
             t = i / (bar_w - 1)
@@ -1694,7 +1792,7 @@ class TelemetryBlock(wx.Panel):
                 max(0, min(255, int(r * 255))),
                 max(0, min(255, int(g * 255))),
                 max(0, min(255, int(b * 255))))))
-            dc.DrawLine(16 + i, h - 8, 16 + i, h - 4)
+            dc.DrawLine(16 + i, h - 4, 16 + i, h - 2)
 
 
 class Viewer(wx.Frame):
@@ -1793,47 +1891,53 @@ class Viewer(wx.Frame):
         self.rail = rail
         rail.Bind(wx.EVT_PAINT, self.on_rail_paint)
 
-        self.telemetry = TelemetryBlock(rail, THEME)
-        self.telemetry.SetMinSize((-1, 108))
+        self.telemetry = TelemetryBlock(panel, THEME)
+        self.telemetry.SetMinSize((-1, 38))
 
         deck = wx.BoxSizer(wx.VERTICAL)
         deck.Add((1, 6), 0)
-        self.start_btn = GlassButton(rail, label="Start stream", accent=True,
+        # Icon rail: glyph + tooltip, no word labels. Every label used to be
+        # text on a dark panel, and ClearType fringed all of them; a glyph has
+        # no subpixels to fringe. It also costs 40 px a row instead of ~220,
+        # which is what lets the image run full-bleed.
+        self.start_btn = GlassButton(rail, icon="play", accent=True,
                                      on_click=self.on_toggle,
-                                     tooltip="start / stop (key: s)")
-        deck.Add(self.start_btn, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 14)
-        deck.Add((1, 10), 0)
-        self.cmap_btn = GlassButton(rail, label="colormap: ironbow",
-                                    on_click=self.on_cmap, tooltip="key: c")
-        self.flat_btn = GlassButton(rail, label="Capture flat (wall)",
-                                    on_click=self.on_capture_flat, tooltip="key: f")
-        flat_clear = GlassButton(rail, label="Clear flat",
-                                 on_click=self.on_clear_flat)
-        snap_btn = GlassButton(rail, label="Save PNG", on_click=self.on_snapshot,
-                               tooltip="key: p")
-        raw_btn = GlassButton(rail, label="Dump raw", on_click=self.on_raw,
-                              tooltip="key: d")
+                                     tooltip="start / stop  (S)")
+        deck.Add(self.start_btn, 0, wx.CENTRE|wx.ALL, 4)
+        deck.Add((1, 6), 0)
+        self.cmap_btn = GlassButton(rail, icon="cmap",
+                                    on_click=self.on_cmap,
+                                    tooltip="next colormap  (C)")
+        self.flat_btn = GlassButton(rail, icon="flat",
+                                    on_click=self.on_capture_flat,
+                                    tooltip="capture flat field, point at a wall  (F)")
+        flat_clear = GlassButton(rail, icon="clear",
+                                 on_click=self.on_clear_flat,
+                                 tooltip="clear the flat reference")
+        snap_btn = GlassButton(rail, icon="png", on_click=self.on_snapshot,
+                               tooltip="save PNG snapshot  (P)")
+        raw_btn = GlassButton(rail, icon="raw", on_click=self.on_raw,
+                              tooltip="dump raw frame  (D)")
         for b in (self.cmap_btn, self.flat_btn, flat_clear, snap_btn, raw_btn):
-            deck.Add(b, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 14)
-            deck.Add((1, 8), 0)
-        # hotspot row lives in the rail too
-        self.spot_btn = GlassButton(rail, label="hot spots: off", small=True,
-                                    on_click=self.on_spot_mode)
-        self.spot_sens_btn = GlassButton(rail, label="sens 1.00", small=True,
-                                         on_click=self.on_spot_sens)
-        hotrow = wx.BoxSizer(wx.HORIZONTAL)
-        hotrow.Add(self.spot_btn, 1, wx.EXPAND|wx.LEFT, 14)
-        hotrow.Add(self.spot_sens_btn, 1, wx.EXPAND|wx.LEFT, 8)
-        deck.Add(hotrow, 0, wx.EXPAND|wx.RIGHT, 14)
+            deck.Add(b, 0, wx.CENTRE|wx.ALL, 4)
+            deck.Add((1, 6), 0)
+        self.spot_btn = GlassButton(rail, icon="spot",
+                                    on_click=self.on_spot_mode,
+                                    tooltip="hot-spot detection mode")
+        self.spot_sens_btn = GlassButton(rail, icon="sens",
+                                         on_click=self.on_spot_sens,
+                                         tooltip="hot-spot sensitivity")
+        deck.Add(self.spot_btn, 0, wx.CENTRE|wx.ALL, 4)
+        deck.Add((1, 6), 0)
+        deck.Add(self.spot_sens_btn, 0, wx.CENTRE|wx.ALL, 4)
         deck.Add((1, 10), 1, wx.EXPAND)           # spring
-
         # diagnostics field: hidden by default (Ctrl+L shows it inside the rail)
         self.log = wx.TextCtrl(rail, style=wx.TE_MULTILINE | wx.TE_READONLY |
                                wx.TE_DONTWRAP)
         self.log.SetBackgroundColour(wx.Colour(*THEME["panel"]))
         self.log.SetForegroundColour(wx.Colour(*THEME["muted"]))
         self.log.SetFont(_ui_font(9, mono=True))
-        deck.Add(self.log, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 14)
+        deck.Add(self.log, 0, wx.EXPAND|wx.ALL, 4)
         self.log.Hide()
         # dev upload row - built, wired, hidden (Ctrl+Alt+D)
         self.dev_host = wx.TextCtrl(rail, value="192.168.50.200:8100",
@@ -1850,25 +1954,28 @@ class Viewer(wx.Frame):
         devbox = wx.BoxSizer(wx.VERTICAL)
         devbox.Add((1, 6), 0)
         for b in (self.dev_host, self.dev_probe, self.dev_bind, self.dev_upload):
-            devbox.Add(b, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 14)
+            devbox.Add(b, 0, wx.EXPAND|wx.ALL, 4)
             devbox.Add((1, 6), 0)
         deck.Add(devbox, 0, wx.EXPAND)
         devbox.ShowItems(False)                   # shipped app: invisible
         self.dev_sizer = devbox
 
+        rail.SetMinSize(wx.Size(52, -1))
         railbox = wx.BoxSizer(wx.VERTICAL)
-        railbox.Add(self.telemetry, 0, wx.EXPAND)
         railbox.Add(deck, 1, wx.EXPAND)
         rail.SetSizer(railbox)
 
         # video canvas: dominant, framed with its own inset margin
         main = wx.BoxSizer(wx.HORIZONTAL)
-        main.Add(self.video, 1, wx.EXPAND|wx.ALL, 12)
+        # Full bleed: no inset margin around the canvas. The 12 px
+        # frame used to border the picture; the HUD and rail sit
+        # outside it now, so the image runs to the window edge.
+        main.Add(self.video, 1, wx.EXPAND)
         main.Add(rail, 0, wx.EXPAND)
-        main.Add((2, 1), 0)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(self.header, 0, wx.EXPAND)
+        sizer.Add(self.telemetry, 0, wx.EXPAND)
         sizer.Add(main, 1, wx.EXPAND)
         panel.SetSizer(sizer)
 
