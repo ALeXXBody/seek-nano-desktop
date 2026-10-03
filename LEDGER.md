@@ -240,7 +240,65 @@ the camera wants 20, so saturated frames climb. Both pre-existing.
 
 ---
 
-## 9. Corrections to my own earlier claims  `[META]`
+## 10. HANDOFF — where to start, and what not to redo  `[META]`
+
+Everything below is on disk. Paths are absolute.
+
+**Do not rebuild these:**
+
+| What | Where |
+|---|---|
+| Real arm64 `libseekcamera.so` (485 KB, off the phone) | `C:\a\_apk\arm64\x\` |
+| `libapp.so` — Dart AOT snapshot, 5.38 MB | `C:\a\_apk\arm64\libapp.so` |
+| `base.apk` + `split_arm64.apk` | `C:\a\_apk\arm64\` |
+| Signed installable instrumented APK | `C:\a\_apk\arm64\signed.apk` |
+| Frida gadget arm64 17.2.17 | `C:\a\_gadget\libseekgadget.so` |
+| JDK / apktool / build-tools | `C:\a\_tools\` |
+
+**Re-run these to reproduce any claim above:** `tests/measure_wall_scene.py`,
+`measure_residual_split.py`, `measure_full_vs_hp.py`, `measure_hp_scale.py`,
+`repro_display_wall.py`, `dis_arm64.py`, `dis_callgraph.py`.
+
+**The two open leads, in priority order:**
+
+1. **Dart pipeline** (`libapp.so`). My claim that the radiometric conversion is
+   "in there" is **UNVERIFIED** — I listed the file and never established
+   anything inside it. The isolate snapshot data is 2.16 MB at offset `0x40c0`,
+   instructions 3.29 MB at `0x236940`. Only 5 dynsym entries survive
+   (`_kDartIsolateSnapshotData` etc.), names are obfuscated, and keyword
+   grepping yields only UI strings. **A Dart snapshot parser is required** to
+   rebuild the object pool and recover real class/method names. That is a
+   substantial piece of work — I mis-scoped it as an afternoon and should not
+   have implied otherwise.
+
+2. **USB init delta** (`0x4e` resource reads, `0x37 fc000400`). `0x37` was
+   already replayed with the config phase and changed nothing
+   (123.6 → 123.8 DL). **`0x4e` has never been tested.** Falsifiable in one
+   run, and a null result is worth as much as a positive one.
+
+**Phone state:** `SM-S938B`, Android 16, wireless ADB. The instrumented build is
+currently installed as `com.thermal.seeknano`. The user was told to reinstall
+from the Play Store. Gadget serves **one client per app launch** and the USB
+session opens during app start, before a hook can attach — that is why
+`tests/capture_usb.py` captured zero transfers. Fix that first if runtime
+capture is wanted.
+
+**Three traps that produce plausible-looking garbage rather than errors:**
+
+- Dart AOT keyword grepping. `inflate`, `FlattenParser`, `postureFlat` all match
+  NUC-shaped regexes.
+- ARM Thumb detection: bit 0 of the symbol value, not the ELF symbol type.
+- `.ARM.exidx` compact entries can resolve mid-function, truncating decodes.
+
+**Do not repeat the failure mode.** Three times this session I announced a
+conclusion ahead of the evidence — "no wall capture needed" (shipped as two
+releases), "the residual is photon noise", and "the conversion is in
+`libapp.so`". Each was a lead stated as a finding. Verify before claiming, and
+say "not established" when that is the truth.
+
+---
+
+## 11. Corrections to my own earlier claims  `[META]`
 
 Recorded because I got these wrong and the ledger should not repeat them.
 
