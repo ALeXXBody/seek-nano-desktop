@@ -64,7 +64,11 @@ dev = frida.get_device_manager().add_remote_device("127.0.0.1:27042")
 procs = {p.pid: p for p in dev.enumerate_processes()}
 target = None
 for pid, p in procs.items():
-    if "seek" in p.name.lower() or "thermals" in p.name.lower():
+    # An embedded gadget registers itself as a process literally named
+    # "Gadget" rather than under the host app's name, so matching on the
+    # package name finds nothing and the run aborts.
+    if "seek" in p.name.lower() or "thermal" in p.name.lower() \
+            or p.name.lower() == "gadget":
         target = p
         break
 if target is None:
