@@ -4378,6 +4378,120 @@ def _run_replay(path):
     app.MainLoop()
 
 
+def probe_resources(_unused=""):
+    """--probe-resources: pull the camera's calibration resources ONCE.
+
+    Established: the phone SDK never asks for a wall; it loads its
+    calibration from FILES named FlatField.bin / Atherm{Lo,Hi}.bin /
+    ThermHgKa.bin / ThermLgKa.bin / ThermLgKm.bin / HG_Delta.bin /
+    ThermAdjust_FF.bin / ColOffset.bin / RDAC.bin / CmdWord.bin /
+    FactorySettings.bin / fsc%N.bin / init%02d.bin (all in
+    libseekcamera.so's rodata), none of which ship in the APK. So they come
+    from the CAMERA through the reads we never replayed: 0x55/0x4E selector
+    pairs and the 0x56/0x58 config pages.
+
+    This probe walks every known read, dumps each unique blob into res/
+    with its sha256 + size, prints the table, and OPTIONALLY PUTs the files
+    to the dev collector (SEEKNANO_PROBE_UPLOAD=host:port) so a remote box
+    can analyse them without a phone in the loop.
+    """
+    import hashlib
+    os.makedirs("res", exist_ok=True)
+    dev = usb.core.find(idVendor=VID, idProduct=PID, backend=_BACKEND)
+    if dev is None:
+        print("camera not found")
+        return 1
+    dev.set_configuration()
+    usb.util.claim_interface(dev, 0)
+
+    def co(r, p):
+        dev.ctrl_transfer(REQ_OUT, r, 0, 0, p, 1250)
+
+    def ci(r, n):
+        return bytes(dev.ctrl_transfer(REQ_IN, r, 0, 0, n, 1250))
+
+    blobs = {}
+
+    def blob(name, data):
+        if not data or len(set(data)) <= 2:
+            return                      # all-zero reads: the regs mostly are
+        h = hashlib.sha256(data).hexdigest()[:16]
+        key = (name, h, len(data))
+        if key in blobs:
+            blobs[key] += 1
+            return
+        blobs[key] = 1
+        path = os.path.join("res", "%s_%s.bin" % (name, h))
+        with open(path, "wb") as fh:
+            fh.write(data)
+        print("%-12s %6d B  %s  -> %s" % (name, len(data), h, path))
+
+    # 1: the identity handshake the vendor replays (dump_mode's opening)
+    co(0x54, b"\x00\x00")
+    co(0x3C, b"\x00\x00")
+    ci(0x3D, 2)
+    co(0x3E, b"\x08\x00")
+    # 0x58 is a STALLED endpoint: it only answers after 0x56 has set an address.
+    # Read it cold and it returns a pipe error, which is what killed the first
+    # run of this probe outright. So every 0x58 is preceded by a 0x56, and the
+    # identity read is done through that pair rather than bare.
+    def via56(addr, n=24):
+        co(0x56, b"\x20\x00" + addr.to_bytes(2, "little") + b"\x00\x00")
+        return ci(0x58, n)
+
+    try:
+        blob("chipid", via56(0x0000, 16))
+    except Exception as e:
+        print("chipid read failed: %r" % (e,))
+    # 2: EVERY selector byte in 0x00..0x40 through the 0x55/0x4E pair -
+    # the resource names suggest the calibration set is staged this way
+    for sel in range(0, 0x41):
+        try:
+            co(0x55, bytes([sel, 0x00]))
+            blob("sel%02x" % sel, ci(0x4E, 64))
+            blob("sel%02x_2" % sel, ci(0x4E, 64))   # a second chunk, if any
+        except Exception as e:
+            print("sel %02x failed: %r" % (sel, e))
+    # 3: the config pages: 0x56 address / 0x58 readback (80 pages of 64 B)
+    for page in range(80):
+        addr = page * 64
+        try:
+            co(0x56, bytes([0x20, 0x00, (addr >> 8) & 0xFF,
+                            addr & 0xFF, 0, 0]))
+            blob("init%02d" % page, ci(0x58, 64))
+        except Exception as e:
+            print("page %02x failed: %r" % (page, e))
+    # 4: status readbacks (0x35) with kicks: bytes beyond the counter may
+    # hold the camera's internal temperature - the radiometric input
+    for _ in range(4):
+        try:
+            co(0x53, b"\x58\x5b\x01\x00")
+            blob("status", ci(0x35, 4))
+        except Exception as e:
+            print("status read failed: %r" % (e,))
+        time.sleep(0.05)
+    print()
+    print("%d unique non-trivial blobs written to res/" % len(blobs))
+    target = os.environ.get("SEEKNANO_PROBE_UPLOAD")
+    if target:
+        host, port = parse_target(target)
+        up = DevUploader(host, port)
+        for (name, h, _n) in sorted(blobs, key=lambda k: k[0]):
+            path = os.path.join("res", "%s_%s.bin" % (name, h))
+            try:
+                with open(path, "rb") as fh:
+                    payload = fh.read()
+                ok, _ = up.put_frame(payload + b"\x00\x00RES:" +
+                                     os.path.basename(path).encode())
+                print("upload %-20s %s" % (os.path.basename(path),
+                                           "ok" if ok else "FAILED"))
+            except Exception as e:
+                print("upload %s failed: %r" % (os.path.basename(path), e))
+    usb.util.dispose_resources(dev)
+    print("probe done")
+    return 0
+
+
 if __name__ == "__main__":
     if "--probe-resources" in sys.argv:
         _crashlog(probe_resources)
@@ -4459,104 +4573,3 @@ if __name__ == "__main__":
         # to trigger from outside the app, and a viewer you have to coax into
         # starting is hard to measure against.
         _crashlog(_run_gui, "--stream" in sys.argv)
-
-
-
-def probe_resources(_unused=""):
-    """--probe-resources: pull the camera's calibration resources ONCE.
-
-    Established: the phone SDK never asks for a wall; it loads its
-    calibration from FILES named FlatField.bin / Atherm{Lo,Hi}.bin /
-    ThermHgKa.bin / ThermLgKa.bin / ThermLgKm.bin / HG_Delta.bin /
-    ThermAdjust_FF.bin / ColOffset.bin / RDAC.bin / CmdWord.bin /
-    FactorySettings.bin / fsc%N.bin / init%02d.bin (all in
-    libseekcamera.so's rodata), none of which ship in the APK. So they come
-    from the CAMERA through the reads we never replayed: 0x55/0x4E selector
-    pairs and the 0x56/0x58 config pages.
-
-    This probe walks every known read, dumps each unique blob into res/
-    with its sha256 + size, prints the table, and OPTIONALLY PUTs the files
-    to the dev collector (SEEKNANO_PROBE_UPLOAD=host:port) so a remote box
-    can analyse them without a phone in the loop.
-    """
-    import hashlib
-    os.makedirs("res", exist_ok=True)
-    dev = usb.core.find(idVendor=VID, idProduct=PID, backend=_BACKEND)
-    if dev is None:
-        print("camera not found")
-        return 1
-    dev.set_configuration()
-    usb.util.claim_interface(dev, 0)
-
-    def co(r, p):
-        dev.ctrl_transfer(REQ_OUT, r, 0, 0, p, 1250)
-
-    def ci(r, n):
-        return bytes(dev.ctrl_transfer(REQ_IN, r, 0, 0, n, 1250))
-
-    blobs = {}
-
-    def blob(name, data):
-        if not data or len(set(data)) <= 2:
-            return                      # all-zero reads: the regs mostly are
-        h = hashlib.sha256(data).hexdigest()[:16]
-        key = (name, h, len(data))
-        if key in blobs:
-            blobs[key] += 1
-            return
-        blobs[key] = 1
-        path = os.path.join("res", "%s_%s.bin" % (name, h))
-        with open(path, "wb") as fh:
-            fh.write(data)
-        print("%-12s %6d B  %s  -> %s" % (name, len(data), h, path))
-
-    # 1: the identity handshake the vendor replays (dump_mode's opening)
-    co(0x54, b"\x00\x00")
-    co(0x3C, b"\x00\x00")
-    ci(0x3D, 2)
-    co(0x3E, b"\x08\x00")
-    blob("chipid", ci(0x58, 16))
-    # 2: EVERY selector byte in 0x00..0x40 through the 0x55/0x4E pair -
-    # the resource names suggest the calibration set is staged this way
-    for sel in range(0, 0x41):
-        try:
-            co(0x55, bytes([sel, 0x00]))
-            blob("sel%02x" % sel, ci(0x4E, 64))
-            blob("sel%02x_2" % sel, ci(0x4E, 64))   # a second chunk, if any
-        except Exception as e:
-            print("sel %02x failed: %r" % (sel, e))
-    # 3: the config pages: 0x56 address / 0x58 readback (80 pages of 64 B)
-    for page in range(80):
-        addr = page * 64
-        try:
-            co(0x56, bytes([0x20, 0x00, (addr >> 8) & 0xFF,
-                            addr & 0xFF, 0, 0]))
-            blob("init%02d" % page, ci(0x58, 64))
-        except Exception as e:
-            print("page %02x failed: %r" % (page, e))
-    # 4: status readbacks (0x35) with kicks: bytes beyond the counter may
-    # hold the camera's internal temperature - the radiometric input
-    for _ in range(4):
-        co(0x53, b"\x58\x5b\x01\x00")
-        blob("status", ci(0x35, 4))
-        time.sleep(0.05)
-    print()
-    print("%d unique non-trivial blobs written to res/" % len(blobs))
-    target = os.environ.get("SEEKNANO_PROBE_UPLOAD")
-    if target:
-        host, port = parse_target(target)
-        up = DevUploader(host, port)
-        for (name, h, _n) in sorted(blobs, key=lambda k: k[0]):
-            path = os.path.join("res", "%s_%s.bin" % (name, h))
-            try:
-                with open(path, "rb") as fh:
-                    payload = fh.read()
-                ok, _ = up.put_frame(payload + b"\x00\x00RES:" +
-                                     os.path.basename(path).encode())
-                print("upload %-20s %s" % (os.path.basename(path),
-                                           "ok" if ok else "FAILED"))
-            except Exception as e:
-                print("upload %s failed: %r" % (os.path.basename(path), e))
-    usb.util.dispose_resources(dev)
-    print("probe done")
-    return 0

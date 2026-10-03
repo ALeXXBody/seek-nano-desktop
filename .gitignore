@@ -35,3 +35,6 @@ nuc_out/
 scanline_fault_*.raw
 out/
 dump/
+
+# probe output: blobs pulled off the camera, device-specific
+app/res/
