@@ -87,9 +87,18 @@ class CommandEvent(object):
 
 ACTIONS = {"s": "on_toggle", "c": "on_cmap", "p": "on_snapshot",
            "d": "on_raw", "f": "on_capture_flat"}
-ACCEL_NAMES = {"Start/stop stream": "s", "Next colormap": "c",
-               "Save PNG snapshot": "p", "Dump raw frame": "d",
-               "Capture flat (wall)": "f"}
+# The captions come from ACCEL_KEY itself rather than being written out here.
+# Hardcoding them meant renaming a button - "Capture flat (wall)" became
+# "Flat reference (optional)" once F stopped being required - broke a test that
+# is about accelerator dispatch, not wording. What matters is that every key in
+# ACCEL_KEY still reaches its handler.
+ACCEL_NAMES = {}
+for _cap, _key in (ns.get("ACCEL_KEY") or {}).items():
+    if isinstance(_key, str) and _key in ACTIONS:
+        ACCEL_NAMES[_cap] = _key
+check(len(ACCEL_NAMES) == len(ACTIONS),
+      "every action key is bound in ACCEL_KEY (found %d of %d)"
+      % (len(ACCEL_NAMES), len(ACTIONS)))
 
 print("1. accelerator path: a CommandEvent has no GetKeyCode")
 check(not hasattr(CommandEvent("x"), "GetKeyCode"),

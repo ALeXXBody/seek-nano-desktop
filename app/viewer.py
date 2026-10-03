@@ -460,7 +460,7 @@ ACCEL_KEY = {
     "Next colormap": "c",
     "Save PNG snapshot": "p",
     "Dump raw frame": "d",
-    "Capture flat (wall)": "f",
+    "Flat reference (optional)": "f",
     "Anchor temperature": "t",
     "Isotherm threshold": "[ ]",
     "Diagnostic stamp": "o",
@@ -1933,7 +1933,8 @@ class Viewer(wx.Frame):
                                     tooltip="next colormap  (C)")
         self.flat_btn = GlassButton(rail, icon="flat",
                                     on_click=self.on_capture_flat,
-                                    tooltip="capture flat field, point at a wall  (F)")
+                                    tooltip="optional: flat reference, point at a uniform "
+                                       "surface  (F)")
         flat_clear = GlassButton(rail, icon="clear",
                                  on_click=self.on_clear_flat,
                                  tooltip="clear the flat reference")
@@ -2053,7 +2054,7 @@ class Viewer(wx.Frame):
         # opens at all.
         names = (("S", "Start/stop stream"), ("C", "Next colormap"),
                  ("P", "Save PNG snapshot"), ("D", "Dump raw frame"),
-                 ("F", "Capture flat (wall)"), ("Q", "Quit"))
+                 ("F", "Flat reference (optional)"), ("Q", "Quit"))
         self._accel_names = {}
         table = []
         for ch, name in names:
@@ -2325,8 +2326,8 @@ class Viewer(wx.Frame):
                                % (int(self.bad.sum()), BAD_NAME)))
         except Exception as e:
             self.bad = None
-            self.q.put(("log", "no usable bad-pixel map (%r) - press F on a flat "
-                               "wall to build one" % (e,)))
+            self.q.put(("log", "no bad-pixel map (%r) - optional: F on a "
+                               "uniform surface builds one" % (e,)))
 
     def on_snapshot(self, ev):
         if self.frame_raw:
@@ -3129,9 +3130,16 @@ class Viewer(wx.Frame):
                                 "%.1f -> %.1f DL" % (gain, raw_dx, fix_dx)))
         else:
             self.q.put(("log", "flat reference REJECTED at gain %s: it would "
-                                "raise noise %.1f -> %.1f DL - press F to "
-                                "re-capture here" % (gain, raw_dx, fix_dx)))
-            self.push_status("stale flat reference - press F to re-capture")
+                                "raise noise %.1f -> %.1f DL - using the "
+                                "automatic background instead. Press F to "
+                                "re-capture, or Clear flat to drop it"
+                                % (gain, raw_dx, fix_dx)))
+            # Say what is happening NOW, not what the user must do. This
+            # message used to read "press F to re-capture", which implied the
+            # picture was broken without it. It is not: the automatic
+            # background is already applied by this point, and F is optional.
+            self.push_status("stale flat ignored - automatic correction "
+                             "in use")
 
     def _process(self, img):
         """ROI float32 -> display-ready float32. One pipeline for screen + PNG.
