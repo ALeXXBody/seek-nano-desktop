@@ -240,6 +240,37 @@ the camera wants 20, so saturated frames climb. Both pre-existing.
 
 ---
 
+## 12. Doors tried on the camera alone, all exhausted  `[PROTO] [NUC]`
+
+Recorded so nobody re-walks them. Each was tested, not reasoned about.
+
+| Door | Result |
+|---|---|
+| Vendor config phase (`0x56`/`0x58`, 80 pages) | 123.6 → 123.8 DL. Bookkeeping only. |
+| `0x37 fc000400` start command | Sent with the config phase. No effect. |
+| `0x55`/`0x4E` selectors 0x00..0xFF | Only **21 of 256** answer. **No** payload exceeds 40 distinct byte values in 64 B. Nothing high-entropy. |
+| Reads larger than 64 B | Return **less**, not more (128/256/1024/4096 all gave 36 B). The 64-byte payload is a frame-timing counter (`05 14`, `06 14`, `07 14`). |
+| `0x35` status readback | Returns zeros. |
+| `0x4E` as an offset into a blob | Consecutive reads drain a queue rather than advancing. `0x55` payload variants beyond `[sel,0x00]` pipe. |
+| **Frame margins** (rows 0-11, 252-259, cols 0-1, 322-341) | **Garbage.** Mean abs frame-to-frame delta 10,675–15,180 vs 14,372 for the ROI itself. Values 0..59,021. Uninitialised DMA buffer, not metadata. |
+| Second USB interface (`MI_01` alt 1, EP `0x82`) | **Already investigated, documented at `viewer.py:52-67`.** Every read returned 177,840 zero bytes; rotating onto it caused the live/dead flicker. `EP_CANDIDATES = (0x81,)` is the result. |
+
+The composite device *is* two interfaces — `MI_00` alt 0 gives `0x01`/`0x81`,
+`MI_01` alt 1 gives `0x02`/`0x82` — confirmed by enumeration. The second pipe is
+dead on this hardware, and pyusb exposes no API for alternate settings anyway.
+
+**The only untried door is the phone app's own storage.** The SDK names
+`FlatField.bin`, `AthermLo/Hi.bin`, `Therm{Hg,Lg}Ka/Km.bin`, `HG_Delta.bin`,
+`ThermAdjust_FF.bin`, `ColOffset.bin`, `RDAC.bin`, `CmdWord.bin`,
+`FactorySettings.bin`, `fsc%N`, `init%02d` — all verified present in
+`libseekcamera.so` rodata in **both** the arm64 and v7a builds, and verified
+**absent from all three APKs**. So the calibration is on the device, and if the
+app cached it locally on first run, `run-as com.thermal.seeknano ls files` finds
+it in one command. That needs wireless ADB, which needs the phone's only USB
+port free of the camera.
+
+---
+
 ## 10. HANDOFF — where to start, and what not to redo  `[META]`
 
 Everything below is on disk. Paths are absolute.

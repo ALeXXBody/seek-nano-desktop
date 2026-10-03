@@ -38,3 +38,4 @@ dump/
 
 # probe output: blobs pulled off the camera, device-specific
 app/res/
+app/crash.txt
