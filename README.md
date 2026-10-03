@@ -29,17 +29,16 @@ the dev row.
    `SeekNano-driver.zip` once (Device Manager fallback in
    [app/README.md](app/README.md)).
 3. Plug the Nano in and run `SeekNano.exe`.
-4. Press **S** to stream. That's it — **no wall capture, no calibration step.**
-   The viewer estimates the sensor's per-pixel offsets shutterlessly from the
-   first few frames and keeps them corrected. See
-   [Getting a clean image](#getting-a-clean-image).
+4. Press **S** to stream. Then point at a plain, uniform wall and press **F**
+   once — see [Getting a clean image](#getting-a-clean-image) for why that step
+   is not optional on Windows.
 
 ## Controls
 
 | Key | Action |
 |---|---|
 | **S** | Start / stop stream |
-| **F** | Capture a flat-field reference — *optional*, see below |
+| **F** | Capture flat-field reference (point at a uniform wall) |
 | **C** | Next colormap |
 | **P** | Save PNG snapshot |
 | **D** | Dump raw frame |
@@ -93,23 +92,39 @@ user-selectable rather than tuned to a fixed answer.
 
 ## Getting a clean image
 
-**Nothing to do — the correction is automatic.** The viewer builds a background
-from the first few frames at the locked gain and high-passes it, which removes
-the sensor's per-pixel offsets without needing a uniform surface to photograph.
-Measured on live frames this leaves **6.0 DL** of neighbour-difference noise
-against a **572 DL** scene span — about **1%**, with the scene intact. The phone
-app does the same thing and never asks you to find a wall, so neither does this.
+**Press F on a uniform wall.** The viewer applies a shutterless background
+correction automatically, and it removes the sensor's fine per-pixel offsets
+without any user action. But it cannot remove everything.
 
-**F is optional.** It captures a reference on a uniform surface, banked per gain,
-which is slightly cleaner still. Skip it unless you want the last few percent.
+Measured on this hardware against a real wall, reproduced offline through the
+real pipeline:
 
-Two things worth knowing if you do press it. The offsets drift as the sensor
-warms, so an old reference actively *hurts* — one captured four hours earlier
-took noise from 223 DL to 318 DL. And a reference is only ever applied while it
-measurably reduces noise on live frames at the current gain; if it does not, the
-viewer says so and falls back to the automatic background rather than trusting
-it. (A stale reference used to *block* that fallback entirely, leaving the
-picture uncorrected for the whole session — hence the emphasis on "falls back".)
+| correction | fixed pattern left |
+|---|---|
+| none | 90.6 DL |
+| automatic high-pass, 9 px (default) | 64.7 DL |
+| automatic high-pass, 61 px | 59.0 DL |
+| **F, on a uniform wall** | **≈ 0** |
+
+The default automatic correction is not optional extra work that F makes
+unnecessary — it is a genuine improvement that leaves the large-scale pattern
+behind. Sweeping the high-pass cutoff from 9 px to 61 px moves that pattern by
+only 5 DL, which means it sits at the same spatial scale as the scene itself:
+no spatial filter can separate pattern from scene, because on a uniform surface
+the two are mixed. Only a reference captured on a uniform surface separates
+them.
+
+**Why the phone app doesn't ask for one:** it calls
+`seekcamera_shutter_trigger` in the vendor's ARM library, dropping the camera's
+mechanical shutter to get its own uniform reference. That symbol is not present
+in the Windows DLLs this project uses, so there is no shutterless equivalent
+here.
+
+Two things to know about F. The offsets drift as the sensor warms, so an old
+reference actively *hurts* — one captured four hours earlier took noise from
+223 DL to 318 DL. And a reference is only applied while it measurably reduces
+noise on live frames at the current gain; if it does not, the viewer says so
+rather than trusting it.
 
 Defective elements are found by their **flicker** rather than their offset,
 judged across the captured frames against a temporal median so the fixed pattern
