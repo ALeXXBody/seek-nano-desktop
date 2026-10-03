@@ -460,7 +460,7 @@ ACCEL_KEY = {
     "Next colormap": "c",
     "Save PNG snapshot": "p",
     "Dump raw frame": "d",
-    "Flat reference (optional)": "f",
+    "Capture flat (wall)": "f",
     "Anchor temperature": "t",
     "Isotherm threshold": "[ ]",
     "Diagnostic stamp": "o",
@@ -1933,8 +1933,7 @@ class Viewer(wx.Frame):
                                     tooltip="next colormap  (C)")
         self.flat_btn = GlassButton(rail, icon="flat",
                                     on_click=self.on_capture_flat,
-                                    tooltip="optional: flat reference, point at a uniform "
-                                       "surface  (F)")
+                                    tooltip="flat reference - point at a uniform wall  (F)")
         flat_clear = GlassButton(rail, icon="clear",
                                  on_click=self.on_clear_flat,
                                  tooltip="clear the flat reference")
@@ -2054,7 +2053,7 @@ class Viewer(wx.Frame):
         # opens at all.
         names = (("S", "Start/stop stream"), ("C", "Next colormap"),
                  ("P", "Save PNG snapshot"), ("D", "Dump raw frame"),
-                 ("F", "Flat reference (optional)"), ("Q", "Quit"))
+                 ("F", "Capture flat (wall)"), ("Q", "Quit"))
         self._accel_names = {}
         table = []
         for ch, name in names:
@@ -2326,8 +2325,8 @@ class Viewer(wx.Frame):
                                % (int(self.bad.sum()), BAD_NAME)))
         except Exception as e:
             self.bad = None
-            self.q.put(("log", "no bad-pixel map (%r) - optional: F on a "
-                               "uniform surface builds one" % (e,)))
+            self.q.put(("log", "no bad-pixel map (%r) - press F on a "
+                               "uniform wall to build one" % (e,)))
 
     def on_snapshot(self, ev):
         if self.frame_raw:
@@ -3130,16 +3129,13 @@ class Viewer(wx.Frame):
                                 "%.1f -> %.1f DL" % (gain, raw_dx, fix_dx)))
         else:
             self.q.put(("log", "flat reference REJECTED at gain %s: it would "
-                                "raise noise %.1f -> %.1f DL - using the "
-                                "automatic background instead. Press F to "
-                                "re-capture, or Clear flat to drop it"
-                                % (gain, raw_dx, fix_dx)))
-            # Say what is happening NOW, not what the user must do. This
-            # message used to read "press F to re-capture", which implied the
-            # picture was broken without it. It is not: the automatic
-            # background is already applied by this point, and F is optional.
-            self.push_status("stale flat ignored - automatic correction "
-                             "in use")
+                                "raise noise %.1f -> %.1f DL - press F to "
+                                "re-capture here" % (gain, raw_dx, fix_dx)))
+            # A rejected reference IS worth telling the user about, because
+            # without a good one the picture on a flat surface is static. See
+            # the note on the automatic background below: it removes the
+            # per-pixel offsets but cannot remove the large-scale pattern.
+            self.push_status("stale flat reference - press F to re-capture")
 
     def _process(self, img):
         """ROI float32 -> display-ready float32. One pipeline for screen + PNG.
@@ -3593,21 +3589,20 @@ class Viewer(wx.Frame):
                         % (hdr[2], hdr[1]))
                 if not (self.ffc is not None and self.ffc_ok) \
                         and self.shown_frames == 1:
-                    # Say it ONCE, on the first frame, and only when no
-                    # correction is actually being applied.
+                    # Say it ONCE, and only when no correction is applied.
                     #
-                    # This used to repeat every 15 frames for the whole session,
-                    # telling the user to point at a wall. It was wrong on both
-                    # counts. The phone app never asks for that, and the
-                    # shutterless background measures well enough that asking is
-                    # noise: 6.0 DL residual against a 572 DL scene span, 1.05%,
-                    # with the scene preserved. And the honest trigger is "no
-                    # correction applied", not "ffc is None" - with a stale
-                    # ffc_latest.raw on disk the old test was false whenever it
-                    # mattered.
+                    # The wording matters and I got it wrong twice. It first
+                    # repeated every 15 frames, which was nagging. It then said
+                    # F was "optional" and that the shutterless background was
+                    # good enough - measured on a scene with a hand and a laptop
+                    # in it, where the pattern was 1% of a 782 DL span. Measured
+                    # on an actual wall the same pattern is 65 DL and no spatial
+                    # filter can remove it (a 9 px high-pass leaves 64.7 DL, a
+                    # 61 px one leaves 59.0). So F is genuinely required and
+                    # the honest state is "pattern still present".
                     self.push_status(
-                        "streaming - shutterless correction active. "
-                        "F on a uniform wall refines it further")
+                        "streaming - press F on a uniform wall to remove the "
+                        "fixed pattern")
                 if self.shown_frames % 50 == 0:
                     # ALSO to the file. Panel-only meant that when frames
                     # stopped being accepted, the counts that explain why
