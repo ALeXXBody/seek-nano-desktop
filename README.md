@@ -236,3 +236,17 @@ The APK is publicly distributed by Seek Thermal and was analysed here strictly
 for interoperability with hardware its owner already possesses. No Seek code or
 assets are redistributed — only our own analysis notes, scripts, and derived
 protocol documentation.
+
+---
+
+## Support
+
+<div align="center">
+
+### ☕ [Buy Me A Coffee — ALeXXBody](https://buymeacoffee.com/alexxbody)
+
+*All support goes into hardware parts and tokens for building more free tools for the community.*
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-alexxbody-FFDD00?logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/alexxbody)
+
+</div>
